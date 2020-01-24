@@ -1,0 +1,79 @@
+{
+  "name": "keybase-merkle-stellar",
+  "version": "0.0.1",
+  "description": "Query merkle root in Stellar blockchain",
+  "keywords": [
+    "keybase",
+    "merkle",
+    "stellar"
+  ],
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "homepage": "https://github.com/keybase/merkle-stellar",
+  "repository": "git@github.com:keybase/merkle-stellar.git",
+  "bugs": {
+    "url": "https://github.com/keybase/merkle-stellar/issues"
+  },
+  "author": "Maxwell Krohn <themax@gmail.com>",
+  "license": "BSD-3-Clause",
+  "engines": {
+    "node": ">=8.0.0"
+  },
+  "files": [
+    "lib/*"
+  ],
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix"
+    ],
+    "*.{json,md,ts}": [
+      "prettier --write",
+      "git add"
+    ]
+  },
+  "scripts": {
+    "modules": "yarn --frozen-lockfile --prefer-offline",
+    "modules-prod": "yarn --frozen-lockfile --prefer-offline --prod",
+    "dev": "tsc --watch",
+    "test": "jest --runInBand",
+    "release": "standard-version",
+    "build": "rm -rf lib/ && tsc",
+    "clean": "rm -rf lib/"
+  },
+  "dependencies": {
+    "@msgpack/msgpack": "^1.11.0",
+    "axios": "^0.19.2",
+    "kbpgp": "^2.1.9",
+    "stellar-sdk": "^3.3.0",
+    "yargs": "^15.1.0"
+  },
+  "devDependencies": {
+    "@types/jest": "24.0.15",
+    "@types/yargs": "^15.0.1",
+    "@typescript-eslint/eslint-plugin": "2.8.0",
+    "@typescript-eslint/parser": "2.0.0",
+    "eslint": "6.2.2",
+    "eslint-config-prettier": "6.7.0",
+    "eslint-config-standard": "14.1.0",
+    "eslint-plugin-filenames": "1.3.2",
+    "eslint-plugin-import": "2.18.2",
+    "eslint-plugin-jsdoc": "15.8.3",
+    "eslint-plugin-node": "9.1.0",
+    "eslint-plugin-prettier": "3.1.1",
+    "eslint-plugin-promise": "4.2.1",
+    "eslint-plugin-standard": "4.0.1",
+    "husky": "3.0.0",
+    "jest": "24.8.0",
+    "lint-staged": "9.2.0",
+    "prettier": "1.19.1",
+    "regenerator-runtime": "0.13.2",
+    "standard-version": "6.0.1",
+    "ts-jest": "24.0.2",
+    "typescript": "3.7.2"
+  }
+}
