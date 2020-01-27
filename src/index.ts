@@ -49,58 +49,70 @@ const fetchPathFromRoot = async (rootHash: Sha256Hash, uid: Uid): Promise<PathFr
   return response.data as PathFromRootJSON
 }
 
-const checkRootAndSig = async (p: PathFromRootJSON, h: Sha256Hash): Promise<Sha512Hash> => {
-  const sig = p.root.sigs[keybaseRootKid].sig
+const checkSigAgainstStellar = async (pathFromRootJSON: PathFromRootJSON, expectedHash: Sha256Hash): Promise<Buffer> => {
+  // First check that the hash of the signature was reflected in the
+  // stellar blockchain, as expected.
+  const sig = pathFromRootJSON.root.sigs[keybaseRootKid].sig
   const buf = Buffer.from(sig, 'base64')
-  const h2 = sha256(buf)
-  if (h != h2) {
+  const gotHash = sha256(buf)
+  if (expectedHash != gotHash) {
     throw new Error('hash mismatch for root sig and stellar memo')
   }
+
+  // Verify the signature is valid, and signed with the expected key
   const f = promisify(kb.verify)
   const sigPayload = await f({binary: buf, kid: keybaseRootKid})
+
+  // The next 5 lines aren't necessary, since they are already performed inside
+  // of kb.verify, but we repeat them here to be explicit that the `sig` object
+  // also contains the text of what the signature was over.
   const object = decode(buf) as KeybaseSig
   const sigPayload2 = object.body.payload
   if (sigPayload.compare(sigPayload2) != 0) {
     throw new Error('buffer comparison failed and should have been the same')
   }
+
+  return sigPayload
+}
+
+const extractRootFromSigPayload = (sigPayload: Buffer): Sha512Hash => {
   const payload = JSON.parse(sigPayload.toString('ascii'))
   return payload.body.root as Sha512Hash
 }
 
-const walkPathToLeaf = (p: PathFromRootJSON, expectedHash: Sha512Hash, uid: Uid): Sha256Hash => {
+const walkPathToLeaf = (pathFromRoot: PathFromRootJSON, expectedHash: Sha512Hash, uid: Uid): Sha256Hash => {
   let i = 1
-  for (const step of p.path) {
+  for (const step of pathFromRoot.path) {
     const prefix = uid.slice(0, i)
-    const obj = JSON.parse(step.node.val)
-    const tab = obj.tab
+    const nodeValue = step.node.val
+    const childrenTable = JSON.parse(nodeValue).tab
+    const gotHash = sha512(Buffer.from(nodeValue, 'ascii'))
+
+    if (gotHash != expectedHash) {
+      throw new Error(`hash mismatch at prefix ${prefix}`)
+    }
 
     // node.type == 2 means that it's a leaf rather than an interior leaf.
     // stop walking and exit here
     if (step.node.type == 2) {
-      const leaf = tab[uid]
+      const leaf = childrenTable[uid]
       // The hash of the tail of the user's sigchain is found at .[1][1]
       // relative to what's stored in the merkle tree leaf.
       const tailHash = leaf[1][1] as Sha256Hash
       return tailHash
     }
-    const gotHash = sha512(Buffer.from(step.node.val, 'ascii'))
-    if (gotHash != expectedHash) {
-      throw new Error(`hash mismatch at prefix ${step.prefix}`)
-    }
-    if (prefix != step.prefix) {
-      throw new Error(`wrong prefix at prefix ${step.prefix}`)
-    }
-    expectedHash = tab[prefix]
+
+    expectedHash = childrenTable[prefix]
     i++
   }
-  return null
+  throw new Error('walked off the end of the tree')
 }
 
 const uint8ArrayToHex = (u: Uint8Array): string => Buffer.from(u).toString('hex')
 
 const checkLink = (sig: any, expectedHash: Sha256Hash, i: number): {payload: ChainLinkJSON; prev: Sha256Hash} => {
   // Sig version 1 and 2 both have a "payload" as a JSON object,
-  // which specifies what the signature was attesting to.
+  // which signifies what the signature was attesting to.
   const innerString = sig.payload_json
   const inner = JSON.parse(innerString) as ChainLinkJSON
   const version = sig.sig_version
@@ -132,7 +144,7 @@ const checkLink = (sig: any, expectedHash: Sha256Hash, i: number): {payload: Cha
 }
 
 // fetch the sig chain for the give user; assert that the chain ends in the
-// given hash. Return the JSON of the links, from newest to oldest.
+// given hash. Return the JSON of the links, from oldest to newest.
 const fetchSigChain = async (h: Sha256Hash, uid: Uid): Promise<ChainLinkJSON[]> => {
   const url = keybaseAPIServerURI + 'sig/get.json?uid=' + uid
   const response = await axios.get(url)
@@ -145,17 +157,19 @@ const fetchSigChain = async (h: Sha256Hash, uid: Uid): Promise<ChainLinkJSON[]> 
     expectedHash = prev
     ret.push(payload)
   }
-  return ret
+  return ret.reverse()
 }
 
 export {Uid}
 
 // checkUid traverses the stellar root down to the given Uid, and returns the
-// statement of the last item signed by that user.
+// full sigchain of the user. This function is kept simple for the basis
+// of site documentation.
 export const checkUid = async (uid: Uid): Promise<ChainLinkJSON[]> => {
   const rootHash = await fetchLatestRootHashFromStellar()
   const pathFromRoot = await fetchPathFromRoot(rootHash, uid)
-  const rootNodeHash = await checkRootAndSig(pathFromRoot, rootHash)
+  const sigPayload = await checkSigAgainstStellar(pathFromRoot, rootHash)
+  const rootNodeHash = extractRootFromSigPayload(sigPayload)
   const chainTail = walkPathToLeaf(pathFromRoot, rootNodeHash, uid)
   const chain = await fetchSigChain(chainTail, uid)
   return chain
