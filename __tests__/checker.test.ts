@@ -1,4 +1,5 @@
 import axios, {AxiosRequestConfig, AxiosInstance} from 'axios'
+
 jest.mock('axios')
 import {apiMock} from './api_mock'
 

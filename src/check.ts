@@ -1,5 +1,15 @@
 import {Server as StellarServer} from 'stellar-sdk'
-import {Uid, Sha256Hash, Sha512Hash, PathFromRootJSON, ChainLinkJSON, KeybaseSig, Sig2Payload, RootSigPayload, PathNodeJSON} from './types'
+import {
+  Uid,
+  Sha256Hash,
+  Sha512Hash,
+  MetadataAndPathJSON,
+  ChainLinkJSON,
+  KeybaseSig,
+  Sig2Payload,
+  RootSigPayload,
+  PathNodeJSON,
+} from './types'
 import {horizonServerURI, keybaseStellarAddress, keybaseRootKid, keybaseAPIServerURI} from './constants'
 import {URLSearchParams} from 'url'
 import axios from 'axios'
@@ -31,7 +41,7 @@ export class Checker {
     this.reporter = new NullReporter()
   }
 
-  async fetchLatestRootHashFromStellar(): Promise<Sha256Hash> {
+  async fetchLatestMetaHashFromStellar(): Promise<Sha256Hash> {
     const reporter = this.reporter.step(`fetch latest root from ${chalk.bold('stellar')}`)
     const horizonServer = new StellarServer(horizonServerURI)
     reporter.start(`contact ${horizonServerURI}`)
@@ -56,14 +66,14 @@ export class Checker {
     return buf.toString('hex') as Sha256Hash
   }
 
-  async fetchPathFromRoot(rootHash: Sha256Hash, uid: Uid): Promise<PathFromRootJSON> {
+  async fetchMetadataAndPath(metaHash: Sha256Hash, uid: Uid): Promise<MetadataAndPathJSON> {
     const params = new URLSearchParams({uid: uid})
-    params.append('start_hash256', rootHash)
+    params.append('start_hash256', metaHash)
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(uid)}`)
     const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
     reporter.start(`contact ${url}`)
     const response = await axios.get(url)
-    const ret = response.data as PathFromRootJSON
+    const ret = response.data as MetadataAndPathJSON
     if (ret.status.code != 0) {
       throw new Error(`error fetching user: ${ret.status.desc}`)
     }
@@ -71,17 +81,17 @@ export class Checker {
     return ret
   }
 
-  extractUid(username: string, pathFromRoot: PathFromRootJSON, legacyUidRootHash: Sha256Hash): Uid {
+  extractUid(username: string, metadataAndPath: MetadataAndPathJSON, legacyUidRootHash: Sha256Hash): Uid {
     const hsh = sha256(Buffer.from(username.toLowerCase(), 'ascii'))
     const potentialUid = (hsh.slice(0, 30) + '19') as Uid
     const reporter = this.reporter.step(`extract UID for ${chalk.italic(username)}`)
     reporter.start()
-    if (potentialUid == pathFromRoot.uid) {
+    if (potentialUid == metadataAndPath.uid) {
       reporter.success(`map to ${chalk.italic(potentialUid)} via hash`)
       return potentialUid
     }
-    this.checkUidAgainstLegacyTree(hsh, pathFromRoot.uid, pathFromRoot.uid_proof_path, legacyUidRootHash)
-    const ret = pathFromRoot.uid
+    this.checkUidAgainstLegacyTree(hsh, metadataAndPath.uid, metadataAndPath.uid_proof_path, legacyUidRootHash)
+    const ret = metadataAndPath.uid
     reporter.success(`map to ${chalk.italic(ret)} via legacy tree`)
     return ret
   }
@@ -114,14 +124,14 @@ export class Checker {
     throw new Error('walked off the end of the tree')
   }
 
-  async fetchPathFromRootByUsername(rootHash: Sha256Hash, username: string): Promise<PathFromRootJSON> {
+  async fetchMetadataAndPathForUsername(metaHash: Sha256Hash, username: string): Promise<MetadataAndPathJSON> {
     const params = new URLSearchParams({username: username})
-    params.append('start_hash256', rootHash)
+    params.append('start_hash256', metaHash)
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(username)}`)
     const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
     reporter.start(`contact ${chalk.grey(url)}`)
     const response = await axios.get(url)
-    const ret = response.data as PathFromRootJSON
+    const ret = response.data as MetadataAndPathJSON
     if (ret.status.code != 0) {
       throw new Error(`error fetching user: ${ret.status.desc}`)
     }
@@ -129,12 +139,12 @@ export class Checker {
     return ret
   }
 
-  async checkSigAgainstStellar(pathFromRootJSON: PathFromRootJSON, expectedHash: Sha256Hash): Promise<RootSigPayload> {
+  async checkSigAgainstStellar(metadataAndPath: MetadataAndPathJSON, expectedHash: Sha256Hash): Promise<RootSigPayload> {
     // First check that the hash of the signature was reflected in the
     // stellar blockchain, as expected.
     const reporter = this.reporter.step(`check hash equality for ${chalk.italic(expectedHash)}`)
     reporter.start()
-    const sig = pathFromRootJSON.root.sigs[keybaseRootKid].sig
+    const sig = metadataAndPath.root.sigs[keybaseRootKid].sig
     const buf = Buffer.from(sig, 'base64')
     const gotHash = sha256(buf)
     if (expectedHash != gotHash) {
@@ -159,10 +169,10 @@ export class Checker {
     return JSON.parse(sigPayload.toString('ascii')) as RootSigPayload
   }
 
-  walkPathToLeaf(pathFromRoot: PathFromRootJSON, expectedHash: Sha512Hash, uid: Uid): Sha256Hash {
+  walkPathToLeaf(metadataAndPath: MetadataAndPathJSON, expectedHash: Sha512Hash, uid: Uid): Sha256Hash {
     let i = 1
     const reporter = this.reporter.step(`walk path to leaf for ${chalk.italic(uid)}`)
-    for (const step of pathFromRoot.path) {
+    for (const step of metadataAndPath.path) {
       const prefix = uid.slice(0, i)
       const nodeValue = step.node.val
       const childrenTable = JSON.parse(nodeValue).tab
@@ -248,10 +258,11 @@ export class Checker {
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
   async checkUid(uid: Uid): Promise<ChainLinkJSON[]> {
-    const rootHash = await this.fetchLatestRootHashFromStellar()
-    const pathFromRoot = await this.fetchPathFromRoot(rootHash, uid)
-    const rootSigPayload = await this.checkSigAgainstStellar(pathFromRoot, rootHash)
-    const chainTail = this.walkPathToLeaf(pathFromRoot, rootSigPayload.body.root, uid)
+    const metaHash = await this.fetchLatestMetaHashFromStellar()
+    const metadataAndPath = await this.fetchMetadataAndPath(metaHash, uid)
+    const rootSigPayload = await this.checkSigAgainstStellar(metadataAndPath, metaHash)
+    const rootHash = rootSigPayload.body.root
+    const chainTail = this.walkPathToLeaf(metadataAndPath, rootHash, uid)
     const chain = await this.fetchSigChain(chainTail, uid)
     return chain
   }
@@ -260,11 +271,11 @@ export class Checker {
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
   async checkUsername(username: string): Promise<ChainLinkJSON[]> {
-    const rootHash = await this.fetchLatestRootHashFromStellar()
-    const pathFromRoot = await this.fetchPathFromRootByUsername(rootHash, username)
-    const rootSigPayload = await this.checkSigAgainstStellar(pathFromRoot, rootHash)
-    const uid = this.extractUid(username, pathFromRoot, rootSigPayload.body.legacy_uid_root)
-    const chainTail = this.walkPathToLeaf(pathFromRoot, rootSigPayload.body.root, uid)
+    const metaHash = await this.fetchLatestMetaHashFromStellar()
+    const metadataAndPath = await this.fetchMetadataAndPathForUsername(metaHash, username)
+    const rootSigPayload = await this.checkSigAgainstStellar(metadataAndPath, metaHash)
+    const uid = this.extractUid(username, metadataAndPath, rootSigPayload.body.legacy_uid_root)
+    const chainTail = this.walkPathToLeaf(metadataAndPath, rootSigPayload.body.root, uid)
     const chain = await this.fetchSigChain(chainTail, uid)
     return chain
   }

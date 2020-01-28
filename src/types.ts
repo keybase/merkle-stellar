@@ -22,7 +22,7 @@ export type PathNodeJSON = {
   }
 }
 
-export type PathFromRootJSON = {
+export type MetadataAndPathJSON = {
   status: {
     code: number
     desc?: string
