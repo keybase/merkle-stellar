@@ -19,6 +19,9 @@
   "engines": {
     "node": ">=8.0.0"
   },
+  "bin": {
+    "merklecheck": "./bin/check"
+  },
   "files": [
     "lib/*"
   ],
@@ -48,7 +51,10 @@
   "dependencies": {
     "@msgpack/msgpack": "^1.11.0",
     "axios": "^0.19.2",
+    "chalk": "^3.0.0",
     "kbpgp": "^2.1.9",
+    "ora": "^4.0.3",
+    "spinnies": "^0.5.1",
     "stellar-sdk": "^3.3.0",
     "yargs": "^15.1.0"
   },
@@ -69,6 +75,7 @@
     "eslint-plugin-standard": "4.0.1",
     "husky": "3.0.0",
     "jest": "24.8.0",
+    "jest-mock-axios": "^3.2.0",
     "lint-staged": "9.2.0",
     "prettier": "1.19.1",
     "regenerator-runtime": "0.13.2",

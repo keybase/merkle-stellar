@@ -13,18 +13,28 @@ export type Sha256Hash = NominalType<string, 'sha256hash'>
 export type Sha512Hash = NominalType<string, 'sha512hash'>
 export type StellarPublicKey = NominalType<string, 'stellarPublicKey'>
 
+export type PathNodeJSON = {
+  prefix: string
+  node: {
+    hash: Sha512Hash
+    val: string
+    type: number
+  }
+}
+
 export type PathFromRootJSON = {
+  status: {
+    code: number
+    desc?: string
+  }
   root: {
     sigs: {[key: string]: {sig: string}}
+    seqno: number
   }
-  path: Array<{
-    prefix: string
-    node: {
-      hash: Sha512Hash
-      val: string
-      type: number
-    }
-  }>
+  path: PathNodeJSON[]
+  uid: Uid
+  username: string
+  uid_proof_path?: PathNodeJSON[]
 }
 
 export type ChainLinkJSON = {
@@ -35,6 +45,13 @@ export type ChainLinkJSON = {
   prev: Sha256Hash
   seqno: number
   tag: 'signature'
+}
+
+export type RootSigPayload = {
+  body: {
+    root: Sha512Hash
+    legacy_uid_root: Sha256Hash
+  }
 }
 
 export type KeybaseSig = {
