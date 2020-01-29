@@ -47,7 +47,7 @@ export type ChainLinkJSON = {
   tag: 'signature'
 }
 
-export type RootSigPayload = {
+export type TreeRoots = {
   body: {
     root: Sha512Hash
     legacy_uid_root: Sha256Hash

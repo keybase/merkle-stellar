@@ -1,15 +1,5 @@
 import {Server as StellarServer} from 'stellar-sdk'
-import {
-  Uid,
-  Sha256Hash,
-  Sha512Hash,
-  MetadataAndPathJSON,
-  ChainLinkJSON,
-  KeybaseSig,
-  Sig2Payload,
-  RootSigPayload,
-  PathNodeJSON,
-} from './types'
+import {Uid, Sha256Hash, Sha512Hash, MetadataAndPathJSON, ChainLinkJSON, KeybaseSig, Sig2Payload, TreeRoots, PathNodeJSON} from './types'
 import {horizonServerURI, keybaseStellarAddress, keybaseRootKid, keybaseAPIServerURI} from './constants'
 import {URLSearchParams} from 'url'
 import axios from 'axios'
@@ -55,7 +45,6 @@ export class Checker {
     }
     const rec = txList.records[0]
     const ledger = await rec.ledger()
-    reporter.success(`returned #${ledger.sequence}, closed at ${ledger.closed_at}`)
     if (rec.memo_type != 'hash') {
       throw new Error('needed a hash type of memo')
     }
@@ -63,6 +52,7 @@ export class Checker {
     if (buf.length != 32) {
       throw new Error('need a 32-byte SHA2 hash')
     }
+    reporter.success(`returned #${ledger.sequence}, closed at ${ledger.closed_at}`)
     return buf.toString('hex') as Sha256Hash
   }
 
@@ -139,7 +129,7 @@ export class Checker {
     return ret
   }
 
-  async checkSigAgainstStellar(metadataAndPath: MetadataAndPathJSON, expectedHash: Sha256Hash): Promise<RootSigPayload> {
+  async checkSigAgainstStellar(metadataAndPath: MetadataAndPathJSON, expectedHash: Sha256Hash): Promise<TreeRoots> {
     // First check that the hash of the signature was reflected in the
     // stellar blockchain, as expected.
     const reporter = this.reporter.step(`check hash equality for ${chalk.italic(expectedHash)}`)
@@ -159,14 +149,14 @@ export class Checker {
     // of kb.verify, but we repeat them here to be explicit that the `sig` object
     // also contains the text of what the signature was over.
     const object = decode(buf) as KeybaseSig
-    const sigPayload2 = object.body.payload
-    if (sigPayload.compare(sigPayload2) != 0) {
+    const treeRootsEncoded = Buffer.from(object.body.payload)
+    if (sigPayload.compare(treeRootsEncoded) != 0) {
       throw new Error('buffer comparison failed and should have been the same')
     }
 
     // Parse and return the root sig payload
     reporter.success('match')
-    return JSON.parse(sigPayload.toString('ascii')) as RootSigPayload
+    return JSON.parse(treeRootsEncoded.toString('ascii')) as TreeRoots
   }
 
   walkPathToLeaf(metadataAndPath: MetadataAndPathJSON, expectedHash: Sha512Hash, uid: Uid): Sha256Hash {
@@ -260,8 +250,8 @@ export class Checker {
   async checkUid(uid: Uid): Promise<ChainLinkJSON[]> {
     const metaHash = await this.fetchLatestMetaHashFromStellar()
     const metadataAndPath = await this.fetchMetadataAndPath(metaHash, uid)
-    const rootSigPayload = await this.checkSigAgainstStellar(metadataAndPath, metaHash)
-    const rootHash = rootSigPayload.body.root
+    const treeRoots = await this.checkSigAgainstStellar(metadataAndPath, metaHash)
+    const rootHash = treeRoots.body.root
     const chainTail = this.walkPathToLeaf(metadataAndPath, rootHash, uid)
     const chain = await this.fetchSigChain(chainTail, uid)
     return chain
@@ -273,9 +263,9 @@ export class Checker {
   async checkUsername(username: string): Promise<ChainLinkJSON[]> {
     const metaHash = await this.fetchLatestMetaHashFromStellar()
     const metadataAndPath = await this.fetchMetadataAndPathForUsername(metaHash, username)
-    const rootSigPayload = await this.checkSigAgainstStellar(metadataAndPath, metaHash)
-    const uid = this.extractUid(username, metadataAndPath, rootSigPayload.body.legacy_uid_root)
-    const chainTail = this.walkPathToLeaf(metadataAndPath, rootSigPayload.body.root, uid)
+    const treeRoots = await this.checkSigAgainstStellar(metadataAndPath, metaHash)
+    const uid = this.extractUid(username, metadataAndPath, treeRoots.body.legacy_uid_root)
+    const chainTail = this.walkPathToLeaf(metadataAndPath, treeRoots.body.root, uid)
     const chain = await this.fetchSigChain(chainTail, uid)
     return chain
   }
