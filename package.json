@@ -1,6 +1,6 @@
 {
   "name": "keybase-merkle-stellar",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Query merkle root in Stellar blockchain",
   "keywords": [
     "keybase",
