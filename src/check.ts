@@ -145,20 +145,20 @@ export class Checker {
     const reporter = this.reporter.step(`check hash equality for ${chalk.italic(expectedHash)}`)
     reporter.start()
     const sig = pathAndSigs.root.sigs[keybaseRootKid].sig
-    const buf = Buffer.from(sig, 'base64')
-    const gotHash = sha256(buf)
+    const sigDecoded = Buffer.from(sig, 'base64')
+    const gotHash = sha256(sigDecoded)
     if (expectedHash != gotHash) {
-      throw new Error('hash mismatch for root sig and stellar memo')
+      throw new Error('hash mismatch for grove sig and stellar memo')
     }
 
     // Verify the signature is valid, and signed with the expected key
     const f = promisify(kb.verify)
-    const sigPayload = await f({binary: buf, kid: keybaseRootKid})
+    const sigPayload = await f({binary: sigDecoded, kid: keybaseRootKid})
 
     // The next 5 lines aren't necessary, since they are already performed inside
     // of kb.verify, but we repeat them here to be explicit that the `sig` object
     // also contains the text of what the signature was over.
-    const object = decode(buf) as KeybaseSig
+    const object = decode(sigDecoded) as KeybaseSig
     const treeRootsEncoded = Buffer.from(object.body.payload)
     if (sigPayload.compare(treeRootsEncoded) != 0) {
       throw new Error('buffer comparison failed and should have been the same')
