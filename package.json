@@ -20,7 +20,7 @@
     "node": ">=8.0.0"
   },
   "bin": {
-    "merklecheck": "./bin/check"
+    "keybase-merkle-stellar-check": "./bin/check"
   },
   "files": [
     "lib/*"
