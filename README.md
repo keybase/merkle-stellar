@@ -31,11 +31,11 @@ The main operations can be found in the [Checker](./src/check.ts) class:
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
   async checkUsername(username: string): Promise<ChainLinkJSON[]> {
-    const metaHash = await this.fetchLatestMetaHashFromStellar()
-    const metadataAndPath = await this.fetchMetadataAndPathForUsername(metaHash, username)
-    const treeRoots = await this.checkSigAgainstStellar(metadataAndPath, metaHash)
-    const uid = this.extractUid(username, metadataAndPath, treeRoots.body.legacy_uid_root)
-    const chainTail = this.walkPathToLeaf(metadataAndPath, treeRoots.body.root, uid)
+    const groveHash = await this.fetchLatestGroveHashFromStellar()
+    const pathAndSigs = await this.fetchPathAndSigsForUsername(groveHash, username)
+    const treeRoots = await this.checkSigAgainstStellar(pathAndSigs, groveHash)
+    const uid = this.extractUid(username, pathAndSigs, treeRoots.body.legacy_uid_root)
+    const chainTail = this.walkPathToLeaf(pathAndSigs, treeRoots.body.root, uid)
     const chain = await this.fetchSigChain(chainTail, uid)
     return chain
   }
