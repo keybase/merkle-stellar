@@ -33,10 +33,10 @@ export type ResetChainLinkJSON = {
   prev: {
     eldest_kid: Kid
     public_seqno: number
-    reset: Sha256Hash | null
+    reset: Sha512Hash | null
   }
   reset_seqno: number
-  type: 'reset'
+  type: 'reset' | 'delete'
   uid: Uid
 }
 

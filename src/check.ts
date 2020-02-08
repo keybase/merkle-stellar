@@ -1,4 +1,4 @@
-import {Server as StellarServer} from 'stellar-sdk'
+import {Server as StellarServer, NetworkError} from 'stellar-sdk'
 import {
   Uid,
   Sha256Hash,
@@ -12,6 +12,7 @@ import {
   ResetChain,
   ChainTail,
   UserSigChain,
+  ResetChainLinkJSON,
 } from './types'
 import {horizonServerURI, keybaseStellarAddress, keybaseRootKid, keybaseAPIServerURI} from './constants'
 import {URLSearchParams} from 'url'
@@ -203,7 +204,6 @@ export class Checker {
       // stop walking and exit here
       if (step.node.type == 2) {
         const leaf = childrenTable[uid] as ChainTail
-        console.log(leaf)
         // The hash of the tail of the user's sigchain is found at .[1][1]
         // relative to what's stored in the merkle tree leaf.
         reporter.success(`tail hash is ${chalk.italic(leaf[1][1])}`)
@@ -243,14 +243,54 @@ export class Checker {
     }
 
     if (gotHash != expectedHash) {
-      throw new Error(`bad sigchain link at ${i}`)
+      throw new Error(`bad sigchain link at ${i} (${gotHash} != ${expectedHash})`)
     }
-
     return {payload: inner, prev: inner.prev}
   }
 
   checkResetChain(pathAndSigs: PathAndSigsJSON, chainTail: ChainTail, uid: Uid): ResetChain | null {
-    return null
+    const resetChainTail = chainTail[4]
+    if (!resetChainTail || resetChainTail[0] == 0) {
+      return null
+    }
+    const resetChain = pathAndSigs.reset_chain
+    if (!resetChain) {
+      throw new Error(`expected a reset chain but didn't find one`)
+    }
+    if (resetChain.length != resetChainTail[0]) {
+      throw new Error(`reset chain tail is wrong length`)
+    }
+
+    let hashExpected = resetChainTail[1]
+    const resetChainLinks = resetChain.reverse()
+    let i = resetChainLinks.length
+    let first = true
+    const ret = [] as ResetChainLinkJSON[]
+    for (const link of resetChainLinks) {
+      const hash = sha512(Buffer.from(link, 'ascii'))
+      if (hashExpected != hash) {
+        throw new Error(`hash mismatch in reset chain`)
+      }
+      const parsedLink = JSON.parse(link) as ResetChainLinkJSON
+      if (parsedLink.reset_seqno != i) {
+        throw new Error(`bad reset chain seqno`)
+      }
+      if (!first && parsedLink.type == 'delete') {
+        throw new Error(`can't have a delete in the middle of the reset chain`)
+      }
+      ret.push(parsedLink)
+      hashExpected = parsedLink.prev.reset
+      i--
+      first = false
+    }
+    if (hashExpected) {
+      throw new Error(`reset chain didn't start with a null prev hash`)
+    }
+    if (i != 0) {
+      throw new Error(`reset chain doesn't start at 1`)
+    }
+
+    return ret.reverse()
   }
 
   // fetch the sig chain for the give user; assert that the chain ends in the
