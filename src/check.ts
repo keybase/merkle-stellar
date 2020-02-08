@@ -139,9 +139,11 @@ export class Checker {
     throw new Error('walked off the end of the tree')
   }
 
-  async fetchPathAndSigsForUsername(groveHash: Sha256Hash, username: string): Promise<PathAndSigsJSON> {
+  async fetchPathAndSigsForUsername(groveHash: Sha256Hash | null, username: string): Promise<PathAndSigsJSON> {
     const params = new URLSearchParams({username: username})
-    params.append('start_hash256', groveHash)
+    if (groveHash) {
+      params.append('start_hash256', groveHash)
+    }
     params.append('load_reset_chain', '1')
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(username)}`)
     const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
@@ -155,7 +157,7 @@ export class Checker {
     return ret
   }
 
-  async checkSigAgainstStellar(pathAndSigs: PathAndSigsJSON, expectedHash: Sha256Hash): Promise<TreeRoots> {
+  async checkSigAgainstStellar(pathAndSigs: PathAndSigsJSON, expectedHash: Sha256Hash | null): Promise<TreeRoots> {
     // First check that the hash of the signature was reflected in the
     // stellar blockchain, as expected.
     const reporter = this.reporter.step(`check hash equality for ${chalk.italic(expectedHash)}`)
@@ -163,7 +165,11 @@ export class Checker {
     const sig = pathAndSigs.root.sigs[keybaseRootKid].sig
     const sigDecoded = Buffer.from(sig, 'base64')
     const gotHash = sha256(sigDecoded)
-    if (expectedHash != gotHash) {
+
+    // We don't always need to pass in a sig from stellar; if the user's sigchain
+    // is newer than the last stellar timestamp, we need to fetch without it;
+    // the rest of the checks still work
+    if (expectedHash && expectedHash != gotHash) {
       throw new Error('hash mismatch for grove sig and stellar memo')
     }
 
