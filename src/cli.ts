@@ -1,6 +1,6 @@
 import yargs from 'yargs'
 import {Checker} from './check'
-import {ChainLinkJSON} from './types'
+import {UserSigChain} from './types'
 import fs from 'fs'
 
 const parseArgv = () =>
@@ -11,7 +11,7 @@ const parseArgv = () =>
       file: {type: 'string', alias: 'f', describe: 'output full JSON to file'},
     }).argv
 
-const output = async (res: ChainLinkJSON[], fileName: string): Promise<void> => {
+const output = async (res: UserSigChain, fileName: string): Promise<void> => {
   if (!!fileName || process.stdout.isTTY) {
     return
   }

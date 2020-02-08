@@ -1,5 +1,18 @@
 import {Server as StellarServer} from 'stellar-sdk'
-import {Uid, Sha256Hash, Sha512Hash, PathAndSigsJSON, ChainLinkJSON, KeybaseSig, Sig2Payload, TreeRoots, PathNodeJSON} from './types'
+import {
+  Uid,
+  Sha256Hash,
+  Sha512Hash,
+  PathAndSigsJSON,
+  ChainLinkJSON,
+  KeybaseSig,
+  Sig2Payload,
+  TreeRoots,
+  PathNodeJSON,
+  ResetChain,
+  ChainTail,
+  UserSigChain,
+} from './types'
 import {horizonServerURI, keybaseStellarAddress, keybaseRootKid, keybaseAPIServerURI} from './constants'
 import {URLSearchParams} from 'url'
 import axios from 'axios'
@@ -69,6 +82,7 @@ export class Checker {
   async fetchPathAndSigs(groveHash: Sha256Hash, uid: Uid): Promise<PathAndSigsJSON> {
     const params = new URLSearchParams({uid: uid})
     params.append('start_hash256', groveHash)
+    params.append('load_reset_chain', '1')
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(uid)}`)
     const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
     reporter.start(`contact ${url}`)
@@ -127,6 +141,7 @@ export class Checker {
   async fetchPathAndSigsForUsername(groveHash: Sha256Hash, username: string): Promise<PathAndSigsJSON> {
     const params = new URLSearchParams({username: username})
     params.append('start_hash256', groveHash)
+    params.append('load_reset_chain', '1')
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(username)}`)
     const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
     reporter.start(`contact ${chalk.grey(url)}`)
@@ -169,7 +184,7 @@ export class Checker {
     return JSON.parse(treeRootsEncoded.toString('ascii')) as TreeRoots
   }
 
-  walkPathToLeaf(pathAndSigs: PathAndSigsJSON, expectedHash: Sha512Hash, uid: Uid): Sha256Hash {
+  walkPathToLeaf(pathAndSigs: PathAndSigsJSON, expectedHash: Sha512Hash, uid: Uid): ChainTail {
     let i = 1
     const reporter = this.reporter.step(`walk path to leaf for ${chalk.italic(uid)}`)
     for (const step of pathAndSigs.path) {
@@ -187,12 +202,12 @@ export class Checker {
       // node.type == 2 means that it's a leaf rather than an interior leaf.
       // stop walking and exit here
       if (step.node.type == 2) {
-        const leaf = childrenTable[uid]
+        const leaf = childrenTable[uid] as ChainTail
+        console.log(leaf)
         // The hash of the tail of the user's sigchain is found at .[1][1]
         // relative to what's stored in the merkle tree leaf.
-        const tailHash = leaf[1][1] as Sha256Hash
-        reporter.success(`tail hash is ${chalk.italic(tailHash)}`)
-        return tailHash
+        reporter.success(`tail hash is ${chalk.italic(leaf[1][1])}`)
+        return leaf
       }
 
       expectedHash = childrenTable[prefix]
@@ -234,9 +249,13 @@ export class Checker {
     return {payload: inner, prev: inner.prev}
   }
 
+  checkResetChain(pathAndSigs: PathAndSigsJSON, chainTail: ChainTail, uid: Uid): ResetChain | null {
+    return null
+  }
+
   // fetch the sig chain for the give user; assert that the chain ends in the
   // given hash. Return the JSON of the links, from oldest to newest.
-  async fetchSigChain(h: Sha256Hash, uid: Uid): Promise<ChainLinkJSON[]> {
+  async fetchChainLinks(h: Sha256Hash, uid: Uid): Promise<ChainLinkJSON[]> {
     const reporter = this.reporter.step(`fetch sigchain from ${chalk.bold('keybase')} for ${chalk.italic(uid)}`)
     const url = keybaseAPIServerURI + 'sig/get.json?uid=' + uid
     reporter.start(`contact ${chalk.grey(url)}`)
@@ -257,27 +276,31 @@ export class Checker {
   // checkUid traverses the stellar root down to the given Uid, and returns the
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
-  async checkUid(uid: Uid): Promise<ChainLinkJSON[]> {
+  async checkUid(uid: Uid): Promise<UserSigChain> {
     const groveHash = await this.fetchLatestGroveHashFromStellar()
     const pathAndSigs = await this.fetchPathAndSigs(groveHash, uid)
     const treeRoots = await this.checkSigAgainstStellar(pathAndSigs, groveHash)
     const rootHash = treeRoots.body.root
     const chainTail = this.walkPathToLeaf(pathAndSigs, rootHash, uid)
-    const chain = await this.fetchSigChain(chainTail, uid)
-    return chain
+    const chainTailHash = chainTail[1][1]
+    const links = await this.fetchChainLinks(chainTailHash, uid)
+    const resets = this.checkResetChain(pathAndSigs, chainTail, uid)
+    return {links: links, resets: resets} as UserSigChain
   }
 
   // checkUsername traverses the stellar root down to the given username, and returns the
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
-  async checkUsername(username: string): Promise<ChainLinkJSON[]> {
+  async checkUsername(username: string): Promise<UserSigChain> {
     const groveHash = await this.fetchLatestGroveHashFromStellar()
     const pathAndSigs = await this.fetchPathAndSigsForUsername(groveHash, username)
     const treeRoots = await this.checkSigAgainstStellar(pathAndSigs, groveHash)
     const uid = this.extractUid(username, pathAndSigs, treeRoots.body.legacy_uid_root)
     const chainTail = this.walkPathToLeaf(pathAndSigs, treeRoots.body.root, uid)
-    const chain = await this.fetchSigChain(chainTail, uid)
-    return chain
+    const chainTailHash = chainTail[1][1]
+    const links = await this.fetchChainLinks(chainTailHash, uid)
+    const resets = this.checkResetChain(pathAndSigs, chainTail, uid)
+    return {links: links, resets: resets} as UserSigChain
   }
 
   // top-level function to the library. Give it a username or UID
@@ -285,7 +308,7 @@ export class Checker {
   // to the leaf of the user, then fetch back their sigchain. It returns
   // the sigchain on success and null on error. It won't throw errors, it catches
   // them.
-  async check(usernameOrUid: string): Promise<ChainLinkJSON[] | null> {
+  async check(usernameOrUid: string): Promise<UserSigChain> {
     try {
       if (usernameOrUid.match(/^[0-9a-f]{30}(00|19)$/)) {
         const ret = await this.checkUid(usernameOrUid as Uid)

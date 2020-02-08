@@ -22,6 +22,24 @@ export type PathNodeJSON = {
   }
 }
 
+export type ResetChain = Array<ResetChainLinkJSON>
+
+export type ResetChainLinkJSON = {
+  ctime: number
+  merkle_root: {
+    hash_meta: Sha256Hash
+    seqno: number
+  }
+  prev: {
+    eldest_kid: Kid
+    public_seqno: number
+    reset: Sha256Hash | null
+  }
+  reset_seqno: number
+  type: 'reset'
+  uid: Uid
+}
+
 export type PathAndSigsJSON = {
   status: {
     code: number
@@ -35,7 +53,27 @@ export type PathAndSigsJSON = {
   uid: Uid
   username: string
   uid_proof_path?: PathNodeJSON[]
+  reset_chain?: string[]
 }
+
+export type ResetChainTail = [number, Sha512Hash]
+
+export type UserSigChain = {
+  links: ChainLinkJSON[]
+  resets: ResetChain | null
+}
+
+export type ChainTail = [
+  number, // version
+  [
+    number, // Publiic Seqno
+    Sha256Hash, // Public Tail Link Hash
+    Sha256Hash // Public Tail Sig Hash
+  ],
+  [],
+  Kid | null, // Eldest Key Id or null if a reset account
+  ResetChainTail | null
+]
 
 export type ChainLinkJSON = {
   body: {
