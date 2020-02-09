@@ -82,24 +82,30 @@ export class Checker {
     return buf.toString('hex') as Sha256Hash
   }
 
-  async fetchPathAndSigs(groveHash: Sha256Hash | null, uid: Uid, last: number): Promise<PathAndSigsJSON> {
+  async fetchPathAndSigsHistorical(uid: Uid, groveHash: Sha256Hash, last: number): Promise<PathAndSigsJSON> {
+    const reporter = this.reporter.step(`fetch historical ${chalk.bold('keybase')} path from root for ${chalk.italic(uid)}`)
     const params = new URLSearchParams({uid: uid})
-    if (groveHash) {
-      params.append('start_hash256', groveHash)
-    }
-    if (last) {
-      params.append('last', '' + last)
-    }
-    params.append('load_reset_chain', '1')
+    params.append('start_hash256', groveHash)
+    params.append('last', '' + last)
+    return this.fetchPathAndSigsWithParams(params, reporter)
+  }
+
+  async fetchPathAndSigsForUid(uid: Uid): Promise<PathAndSigsJSON> {
+    const params = new URLSearchParams({uid: uid})
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(uid)}`)
+    return this.fetchPathAndSigsWithParams(params, reporter)
+  }
+
+  async fetchPathAndSigsWithParams(params: URLSearchParams, step: Step): Promise<PathAndSigsJSON> {
+    params.append('load_reset_chain', '1')
     const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
-    reporter.start(`contact ${url}`)
+    step.start(`contact ${url}`)
     const response = await axios.get(url)
     const ret = response.data as PathAndSigsJSON
     if (ret.status.code != 0) {
       throw new Error(`error fetching user: ${ret.status.desc}`)
     }
-    reporter.success(`got back seqno #${ret.root.seqno}`)
+    step.success(`got back seqno #${ret.root.seqno}`)
     return ret
   }
 
@@ -146,23 +152,13 @@ export class Checker {
     throw new Error('walked off the end of the tree')
   }
 
-  async fetchPathAndSigsForUsername(groveHash: Sha256Hash, username: string): Promise<PathAndSigsJSON> {
+  async fetchPathAndSigsForUsername(username: string): Promise<PathAndSigsJSON> {
     const params = new URLSearchParams({username: username})
-    params.append('start_hash256', groveHash)
-    params.append('load_reset_chain', '1')
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(username)}`)
-    const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
-    reporter.start(`contact ${chalk.grey(url)}`)
-    const response = await axios.get(url)
-    const ret = response.data as PathAndSigsJSON
-    if (ret.status.code != 0) {
-      throw new Error(`error fetching user: ${ret.status.desc}`)
-    }
-    reporter.success(`got back seqno #${ret.root.seqno}`)
-    return ret
+    return this.fetchPathAndSigsWithParams(params, reporter)
   }
 
-  async checkSigAgainstStellar(pathAndSigs: PathAndSigsJSON, expectedHash: Sha256Hash | null): Promise<TreeRoots> {
+  async checkRootSigs(pathAndSigs: PathAndSigsJSON, expectedHash: Sha256Hash | null): Promise<TreeRoots> {
     // First check that the hash of the signature was reflected in the
     // stellar blockchain, as expected.
     const reporter = this.reporter.step(`check hash equality for ${chalk.italic(expectedHash)}`)
@@ -347,24 +343,6 @@ export class Checker {
     return ret.reverse()
   }
 
-  async updateChainTails(
-    links: ChainLinkJSON[],
-    pathAndSigs: PathAndSigsJSON,
-    chainTails: ChainTails,
-    uid: Uid
-  ): Promise<[PathAndSigsJSON, ChainTails]> {
-    const reporter = this.reporter.step(`refresh tail for chain that has recently updated`)
-    const freshPathAndSigs = await this.fetchPathAndSigs(null, uid, 0)
-    const treeRoots = await this.checkSigAgainstStellar(freshPathAndSigs, null)
-    const rootHash = treeRoots.body.root
-    const freshChainTails = this.walkPathToLeaf(freshPathAndSigs, rootHash, uid)
-    const sigChainTail = chainTails[1]
-    links.reverse()
-    const low = links[links.length - 1].seqno
-    const userSigs = await this.fetchRawChain(uid, low, reporter)
-    return [freshPathAndSigs, chainTails]
-  }
-
   checkSkips(latest: PathAndSigsJSON, historical: PathAndSigsJSON) {
     return
   }
@@ -383,16 +361,20 @@ export class Checker {
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
   async checkUid(uid: Uid): Promise<UserSigChain> {
-    const latestPathAndSigs = await this.fetchPathAndSigs(null, uid, 0)
-    const latestTreeRoots = await this.checkSigAgainstStellar(latestPathAndSigs, null)
+    const latestPathAndSigs = await this.fetchPathAndSigsForUid(uid)
+    const latestTreeRoots = await this.checkRootSigs(latestPathAndSigs, null)
+    return this.checkCommon(latestPathAndSigs, latestTreeRoots, uid)
+  }
+
+  async checkCommon(latestPathAndSigs: PathAndSigsJSON, latestTreeRoots: TreeRoots, uid: Uid): Promise<UserSigChain> {
     const groveHash = await this.fetchLatestGroveHashFromStellar()
-    const stellarPathAndSigs = await this.fetchPathAndSigs(groveHash, uid, latestTreeRoots.body.seqno)
+    const stellarPathAndSigs = await this.fetchPathAndSigsHistorical(uid, groveHash, latestTreeRoots.body.seqno)
     this.checkSkips(latestPathAndSigs, stellarPathAndSigs)
 
     const latestRootHash = latestTreeRoots.body.root
     const latestChainTails = this.walkPathToLeaf(latestPathAndSigs, latestRootHash, uid)
 
-    const stellarTreeRoots = await this.checkSigAgainstStellar(stellarPathAndSigs, groveHash)
+    const stellarTreeRoots = await this.checkRootSigs(stellarPathAndSigs, groveHash)
     const stellarRootHash = stellarTreeRoots.body.root
     const stellarChainTails = this.walkPathToLeaf(stellarPathAndSigs, stellarRootHash, uid)
 
@@ -407,15 +389,10 @@ export class Checker {
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
   async checkUsername(username: string): Promise<UserSigChain> {
-    const groveHash = await this.fetchLatestGroveHashFromStellar()
-    const pathAndSigs = await this.fetchPathAndSigsForUsername(groveHash, username)
-    const treeRoots = await this.checkSigAgainstStellar(pathAndSigs, groveHash)
-    const uid = this.extractUid(username, pathAndSigs, treeRoots.body.legacy_uid_root)
-    const chainTails = this.walkPathToLeaf(pathAndSigs, treeRoots.body.root, uid)
-    const sigChainTail = chainTails[1]
-    const links = await this.fetchAndCheckChainLinks(null, uid)
-    const resets = this.checkResetChain(pathAndSigs, chainTails, uid)
-    return {links: links, resets: resets} as UserSigChain
+    const latestPathAndSigs = await this.fetchPathAndSigsForUsername(username)
+    const latestTreeRoots = await this.checkRootSigs(latestPathAndSigs, null)
+    const uid = this.extractUid(username, latestPathAndSigs, latestTreeRoots.body.legacy_uid_root)
+    return this.checkCommon(latestPathAndSigs, latestTreeRoots, uid)
   }
 
   // top-level function to the library. Give it a username or UID

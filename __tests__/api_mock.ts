@@ -13,12 +13,16 @@ const apiMockDataFile = (url: string): string | null => {
       './data/path_by_uid_max.json',
     'https://keybase.io/_/api/1.0/merkle/path.json?uid=dbb165b7879fe7b1174df73bed0b9500&load_reset_chain=1': './data/path_by_uid_max.json',
     'https://keybase.io/_/api/1.0/sig/get.json?uid=dbb165b7879fe7b1174df73bed0b9500': './data/sigs_for_max.json',
+    'https://keybase.io/_/api/1.0/merkle/path.json?username=max&load_reset_chain=1': './data/path_by_username_max.json',
     'https://keybase.io/_/api/1.0/merkle/path.json?username=max&start_hash256=2dd5285fe116e8cc3a70f026338b7373c486d1229d0f97d8b2027c70db4707ac&load_reset_chain=1':
       './data/path_by_username_max.json',
-    'https://keybase.io/_/api/1.0/merkle/path.json?username=zanderz&start_hash256=2dd5285fe116e8cc3a70f026338b7373c486d1229d0f97d8b2027c70db4707ac&load_reset_chain=1':
+    'https://keybase.io/_/api/1.0/merkle/path.json?username=zanderz&load_reset_chain=1': './data/path_by_username_zanderz.json',
+    'https://keybase.io/_/api/1.0/merkle/path.json?uid=673a740cd20fb4bd348738b16d228219&start_hash256=2dd5285fe116e8cc3a70f026338b7373c486d1229d0f97d8b2027c70db4707ac&last=14393662&load_reset_chain=1':
       './data/path_by_username_zanderz.json',
     'https://keybase.io/_/api/1.0/sig/get.json?uid=673a740cd20fb4bd348738b16d228219': './data/sigs_for_zanderz.json',
-    'https://keybase.io/_/api/1.0/merkle/path.json?uid=10286214005a3b5c1c284b7374e97c19&start_hash256=2dd5285fe116e8cc3a70f026338b7373c486d1229d0f97d8b2027c70db4707ac&load_reset_chain=1':
+    'https://keybase.io/_/api/1.0/merkle/path.json?uid=10286214005a3b5c1c284b7374e97c19&load_reset_chain=1':
+      './data/path_by_uid_bitn3ss.json',
+    'https://keybase.io/_/api/1.0/merkle/path.json?uid=10286214005a3b5c1c284b7374e97c19&start_hash256=2dd5285fe116e8cc3a70f026338b7373c486d1229d0f97d8b2027c70db4707ac&last=14393662&load_reset_chain=1':
       './data/path_by_uid_bitn3ss.json',
     'https://keybase.io/_/api/1.0/sig/get.json?uid=10286214005a3b5c1c284b7374e97c19': './data/sigs_for_bitn3ss.json',
   }
