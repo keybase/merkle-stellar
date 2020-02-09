@@ -356,15 +356,34 @@ export class Checker {
     return ret.reverse()
   }
 
-  checkSkips(latest: PathAndSigsJSON, historical: PathAndSigsJSON) {
+  checkSkips(latest: PathAndSigsJSON, latestTreeRoots: TreeRoots, historical: PathAndSigsJSON) {
     const reporter = this.reporter.step(`check skips from ${latest.root.seqno}<-${historical.root.seqno}`)
     reporter.start('')
-    const diff = latest.root.seqno - historical.root.seqno
+    let currSeqno = latest.root.seqno
+    const diff = currSeqno - historical.root.seqno
     if (diff == 0) {
       reporter.success('equal')
       return
     }
     const seq = generateLogSequence(diff)
+    let curr = latestTreeRoots
+    let i = 0
+    for (const jump of seq) {
+      const nextSeqno = currSeqno - jump
+      const nextHash = curr.body.skips['' + nextSeqno]
+      if (!nextSeqno) {
+        throw new Error(`server did not return a skip for seqno ${nextSeqno}`)
+      }
+      const nextEncoded = historical.skips[i]
+      const computedHash = sha256(Buffer.from(nextEncoded, 'ascii'))
+      if (computedHash != nextHash) {
+        throw new Error(`root block hash mismatch at ${nextSeqno}`)
+      }
+      reporter.update(`skipped to ${nextSeqno}`)
+      const next = JSON.parse(nextEncoded) as TreeRoots
+      curr = next
+      i++
+    }
     reporter.update(`generated log sequence: ${JSON.stringify(seq)}`)
     reporter.success(`done`)
     return
@@ -392,7 +411,7 @@ export class Checker {
   async checkCommon(latestPathAndSigs: PathAndSigsJSON, latestTreeRoots: TreeRoots, uid: Uid): Promise<UserSigChain> {
     const groveHash = await this.fetchLatestGroveHashFromStellar()
     const stellarPathAndSigs = await this.fetchPathAndSigsHistorical(uid, groveHash, latestTreeRoots.body.seqno)
-    this.checkSkips(latestPathAndSigs, stellarPathAndSigs)
+    this.checkSkips(latestPathAndSigs, latestTreeRoots, stellarPathAndSigs)
 
     const latestRootHash = latestTreeRoots.body.root
     const latestChainTails = this.walkPathToLeaf(latestPathAndSigs, latestRootHash, uid)

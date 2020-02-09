@@ -93,6 +93,9 @@ export type TreeRoots = {
     root: Sha512Hash
     legacy_uid_root: Sha256Hash
     seqno: number
+    skips?: {
+      [key: string]: Sha256Hash
+    }
   }
 }
 
