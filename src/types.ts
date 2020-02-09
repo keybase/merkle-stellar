@@ -54,6 +54,7 @@ export type PathAndSigsJSON = {
   username: string
   uid_proof_path?: PathNodeJSON[]
   reset_chain?: string[]
+  skips?: string[]
 }
 
 export type ResetChainTail = [number, Sha512Hash]
@@ -91,6 +92,7 @@ export type TreeRoots = {
   body: {
     root: Sha512Hash
     legacy_uid_root: Sha256Hash
+    seqno: number
   }
 }
 

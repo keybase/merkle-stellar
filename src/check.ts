@@ -82,9 +82,14 @@ export class Checker {
     return buf.toString('hex') as Sha256Hash
   }
 
-  async fetchPathAndSigs(groveHash: Sha256Hash, uid: Uid): Promise<PathAndSigsJSON> {
+  async fetchPathAndSigs(groveHash: Sha256Hash | null, uid: Uid, last: number): Promise<PathAndSigsJSON> {
     const params = new URLSearchParams({uid: uid})
-    params.append('start_hash256', groveHash)
+    if (groveHash) {
+      params.append('start_hash256', groveHash)
+    }
+    if (last) {
+      params.append('last', '' + last)
+    }
     params.append('load_reset_chain', '1')
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(uid)}`)
     const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
@@ -141,11 +146,9 @@ export class Checker {
     throw new Error('walked off the end of the tree')
   }
 
-  async fetchPathAndSigsForUsername(groveHash: Sha256Hash | null, username: string): Promise<PathAndSigsJSON> {
+  async fetchPathAndSigsForUsername(groveHash: Sha256Hash, username: string): Promise<PathAndSigsJSON> {
     const params = new URLSearchParams({username: username})
-    if (groveHash) {
-      params.append('start_hash256', groveHash)
-    }
+    params.append('start_hash256', groveHash)
     params.append('load_reset_chain', '1')
     const reporter = this.reporter.step(`fetch ${chalk.bold('keybase')} path from root for ${chalk.italic(username)}`)
     const url = keybaseAPIServerURI + 'merkle/path.json?' + params.toString()
@@ -189,7 +192,7 @@ export class Checker {
     }
 
     // Parse and return the root sig payload
-    reporter.success('match')
+    reporter.success(expectedHash ? 'match' : 'skipped')
     return JSON.parse(treeRootsEncoded.toString('ascii')) as TreeRoots
   }
 
@@ -317,28 +320,22 @@ export class Checker {
 
   // fetch the sig chain for the give user; assert that the chain ends in the
   // given hash. Return the JSON of the links, from oldest to newest.
-  async fetchAndCheckChainLinks(tail: SigChainTail, uid: Uid): Promise<ChainLinkJSON[]> {
+  async fetchAndCheckChainLinks(assertions: Map<number, Sha256Hash>, uid: Uid): Promise<ChainLinkJSON[]> {
     const reporter = this.reporter.step(`fetch sigchain from ${chalk.bold('keybase')} for ${chalk.italic(uid)}`)
     reporter.start('fetch raw chain')
     const sigs = await this.fetchRawChain(uid, 0, reporter)
     const numSigs = sigs.length
     const ret: ChainLinkJSON[] = []
-    let expectedHash: Sha256Hash = null
 
-    // The chain might be ahead of the Tail, since we only post to stellar once an hour,
-    // and the user could have been active after the last post. But even if the
-    // tail points to the interior of the chain, we still check that it is consistent
-    // with the chain up until that point.
-    if (tail[0] == numSigs) {
-      expectedHash = tail[1]
-    }
+    // We usually have an assertion of link seqno -> hash for the last link, but
+    // no always, there could have been a race
+    let expectedHash = assertions.get(numSigs)
 
     for (let seqno = numSigs; seqno >= 1; seqno--) {
       const index = seqno - 1
 
-      // Here is where we check the chain with the tail we observed in the tree,
-      // even if the tree is behind.
-      if (tail[0] == seqno && expectedHash != tail[1]) {
+      const assertedHash = assertions.get(seqno)
+      if (assertedHash && expectedHash != assertedHash) {
         throw new Error(`got wrong expected hash (via tree) at ${seqno}`)
       }
 
@@ -350,18 +347,59 @@ export class Checker {
     return ret.reverse()
   }
 
+  async updateChainTails(
+    links: ChainLinkJSON[],
+    pathAndSigs: PathAndSigsJSON,
+    chainTails: ChainTails,
+    uid: Uid
+  ): Promise<[PathAndSigsJSON, ChainTails]> {
+    const reporter = this.reporter.step(`refresh tail for chain that has recently updated`)
+    const freshPathAndSigs = await this.fetchPathAndSigs(null, uid, 0)
+    const treeRoots = await this.checkSigAgainstStellar(freshPathAndSigs, null)
+    const rootHash = treeRoots.body.root
+    const freshChainTails = this.walkPathToLeaf(freshPathAndSigs, rootHash, uid)
+    const sigChainTail = chainTails[1]
+    links.reverse()
+    const low = links[links.length - 1].seqno
+    const userSigs = await this.fetchRawChain(uid, low, reporter)
+    return [freshPathAndSigs, chainTails]
+  }
+
+  checkSkips(latest: PathAndSigsJSON, historical: PathAndSigsJSON) {
+    return
+  }
+
+  checkChainGrowth(latest: SigChainTail, historical: SigChainTail): Map<number, Sha256Hash> {
+    if (latest[0] < historical[0]) {
+      throw new Error(`chain grew backwards between two merkle fetches`)
+    }
+    const ret = new Map<number, Sha256Hash>()
+    ret.set(latest[0], latest[1])
+    ret.set(historical[0], historical[1])
+    return ret
+  }
+
   // checkUid traverses the stellar root down to the given Uid, and returns the
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
   async checkUid(uid: Uid): Promise<UserSigChain> {
+    const latestPathAndSigs = await this.fetchPathAndSigs(null, uid, 0)
+    const latestTreeRoots = await this.checkSigAgainstStellar(latestPathAndSigs, null)
     const groveHash = await this.fetchLatestGroveHashFromStellar()
-    const pathAndSigs = await this.fetchPathAndSigs(groveHash, uid)
-    const treeRoots = await this.checkSigAgainstStellar(pathAndSigs, groveHash)
-    const rootHash = treeRoots.body.root
-    const chainTails = this.walkPathToLeaf(pathAndSigs, rootHash, uid)
-    const sigChainTail = chainTails[1]
-    const links = await this.fetchAndCheckChainLinks(sigChainTail, uid)
-    const resets = this.checkResetChain(pathAndSigs, chainTails, uid)
+    const stellarPathAndSigs = await this.fetchPathAndSigs(groveHash, uid, latestTreeRoots.body.seqno)
+    this.checkSkips(latestPathAndSigs, stellarPathAndSigs)
+
+    const latestRootHash = latestTreeRoots.body.root
+    const latestChainTails = this.walkPathToLeaf(latestPathAndSigs, latestRootHash, uid)
+
+    const stellarTreeRoots = await this.checkSigAgainstStellar(stellarPathAndSigs, groveHash)
+    const stellarRootHash = stellarTreeRoots.body.root
+    const stellarChainTails = this.walkPathToLeaf(stellarPathAndSigs, stellarRootHash, uid)
+
+    const chainAssertions = this.checkChainGrowth(latestChainTails[1], stellarChainTails[1])
+
+    const links = await this.fetchAndCheckChainLinks(chainAssertions, uid)
+    const resets = this.checkResetChain(latestPathAndSigs, latestChainTails, uid)
     return {links: links, resets: resets} as UserSigChain
   }
 
@@ -375,7 +413,7 @@ export class Checker {
     const uid = this.extractUid(username, pathAndSigs, treeRoots.body.legacy_uid_root)
     const chainTails = this.walkPathToLeaf(pathAndSigs, treeRoots.body.root, uid)
     const sigChainTail = chainTails[1]
-    const links = await this.fetchAndCheckChainLinks(sigChainTail, uid)
+    const links = await this.fetchAndCheckChainLinks(null, uid)
     const resets = this.checkResetChain(pathAndSigs, chainTails, uid)
     return {links: links, resets: resets} as UserSigChain
   }
