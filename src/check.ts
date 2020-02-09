@@ -50,6 +50,19 @@ const sha512 = (b: Buffer): Sha512Hash => {
 
 const uint8ArrayToHex = (u: Uint8Array): string => Buffer.from(u).toString('hex')
 
+const generateLogSequence = (n: number): number[] => {
+  const ret: number[] = []
+  let step = 1
+  while (n > 0) {
+    if ((n & 0x1) == 0x1) {
+      ret.push(step)
+    }
+    n = n >> 1
+    step = step << 1
+  }
+  return ret.reverse()
+}
+
 export class Checker {
   reporter: Reporter
 
@@ -344,6 +357,16 @@ export class Checker {
   }
 
   checkSkips(latest: PathAndSigsJSON, historical: PathAndSigsJSON) {
+    const reporter = this.reporter.step(`check skips from ${latest.root.seqno}<-${historical.root.seqno}`)
+    reporter.start('')
+    const diff = latest.root.seqno - historical.root.seqno
+    if (diff == 0) {
+      reporter.success('equal')
+      return
+    }
+    const seq = generateLogSequence(diff)
+    reporter.update(`generated log sequence: ${JSON.stringify(seq)}`)
+    reporter.success(`done`)
     return
   }
 
