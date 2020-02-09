@@ -63,13 +63,15 @@ export type UserSigChain = {
   resets: ResetChain | null
 }
 
-export type ChainTail = [
+export type SigChainTail = [
+  number, // Publiic Seqno
+  Sha256Hash, // Public Tail Link Hash
+  Sha256Hash // Public Tail Sig Hash
+]
+
+export type ChainTails = [
   number, // version
-  [
-    number, // Publiic Seqno
-    Sha256Hash, // Public Tail Link Hash
-    Sha256Hash // Public Tail Sig Hash
-  ],
+  SigChainTail, // public SigChainTail
   [],
   Kid | null, // Eldest Key Id or null if a reset account
   ResetChainTail | null
@@ -103,6 +105,12 @@ export type KeybaseSig = {
   }
   tag: number
   version: 1
+}
+
+export type RawLinkJSON = {
+  payload_json: string
+  sig: string
+  sig_version: number
 }
 
 export type Sig2Payload = [number, number, Uint8Array, Uint8Array, number, number, boolean]
