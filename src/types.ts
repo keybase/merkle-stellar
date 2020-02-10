@@ -62,6 +62,7 @@ export type ResetChainTail = [number, Sha512Hash]
 export type UserSigChain = {
   links: ChainLinkJSON[]
   resets: ResetChain | null
+  maxes: ChainMaxes
 }
 
 export type SigChainTail = [
@@ -119,3 +120,33 @@ export type RawLinkJSON = {
 }
 
 export type Sig2Payload = [number, number, Uint8Array, Uint8Array, number, number, boolean]
+
+export class ChainMaxes {
+  sig: number
+  merkle: number
+  stellar: number
+
+  isFresh(): boolean {
+    return this.sig == this.merkle && this.merkle == this.stellar
+  }
+
+  constructor(arg: {sig: number; merkle: number; stellar: number}) {
+    this.sig = arg.sig
+    this.merkle = arg.merkle
+    this.stellar = arg.stellar
+  }
+
+  generateWarning(): string[] {
+    if (this.isFresh()) {
+      return []
+    }
+    let ret: string[] = []
+    if (this.sig > this.merkle) {
+      ret.push(`Merkle tree is behind sigchain: ${this.sig} > ${this.merkle}`)
+    }
+    if (this.merkle > this.stellar) {
+      ret.push(`Merkle tree is behind the Stellar blockchain: ${this.merkle} > ${this.stellar}`)
+    }
+    return ret
+  }
+}

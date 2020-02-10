@@ -15,6 +15,7 @@ import {
   ResetChainLinkJSON,
   SigChainTail,
   RawLinkJSON,
+  ChainMaxes,
 } from './types'
 import {horizonServerURI, keybaseStellarAddress, keybaseRootKid, keybaseAPIServerURI} from './constants'
 import {URLSearchParams} from 'url'
@@ -25,7 +26,6 @@ import {kb} from 'kbpgp'
 import {decode} from '@msgpack/msgpack'
 import {Reporter, Step, NullReporter, InteractiveReporter} from './reporter'
 import chalk from 'chalk'
-import {PaymentCallBuilder} from 'stellar-sdk/lib/payment_call_builder'
 
 const sha256 = (b: Buffer): Sha256Hash => {
   return createHash('sha256')
@@ -423,6 +423,14 @@ export class Checker {
     return this.checkCommon(latestPathAndSigs, latestTreeRoots, uid)
   }
 
+  makeChainMaxes(links: ChainLinkJSON[], latestChainTails: ChainTails, stellarChainTails: ChainTails): ChainMaxes {
+    return new ChainMaxes({
+      sig: links ? links.length : 0,
+      merkle: latestChainTails[1][0],
+      stellar: stellarChainTails[1][0],
+    })
+  }
+
   async checkCommon(latestPathAndSigs: PathAndSigsJSON, latestTreeRoots: TreeRoots, uid: Uid): Promise<UserSigChain> {
     const groveHash = await this.fetchLatestGroveHashFromStellar()
     const stellarPathAndSigs = await this.fetchPathAndSigsHistorical(uid, groveHash, latestTreeRoots.body.seqno)
@@ -439,7 +447,8 @@ export class Checker {
 
     const links = await this.fetchAndCheckChainLinks(chainAssertions, uid)
     const resets = this.checkResetChain(latestPathAndSigs, latestChainTails, uid)
-    return {links: links, resets: resets} as UserSigChain
+    const chainMaxes = this.makeChainMaxes(links, latestChainTails, stellarChainTails)
+    return {links: links, resets: resets, maxes: chainMaxes} as UserSigChain
   }
 
   // checkUsername traverses the stellar root down to the given username, and returns the
@@ -459,16 +468,21 @@ export class Checker {
   // them.
   async check(usernameOrUid: string): Promise<UserSigChain> {
     try {
-      if (usernameOrUid.match(/^[0-9a-f]{30}(00|19)$/)) {
-        const ret = await this.checkUid(usernameOrUid as Uid)
-        return ret
-      }
-      const ret = await this.checkUsername(usernameOrUid)
+      const ret = await this.checkUidOrUsername(usernameOrUid)
       return ret
     } catch (e) {
       this.reporter.error(e)
       return null
     }
+  }
+
+  async checkUidOrUsername(usernameOrUid: string): Promise<UserSigChain> {
+    if (usernameOrUid.match(/^[0-9a-f]{30}(00|19)$/)) {
+      const ret = await this.checkUid(usernameOrUid as Uid)
+      return ret
+    }
+    const ret = await this.checkUsername(usernameOrUid)
+    return ret
   }
 
   interactiveReporting() {
