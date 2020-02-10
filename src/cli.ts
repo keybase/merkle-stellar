@@ -2,6 +2,7 @@ import yargs from 'yargs'
 import {Checker} from './check'
 import {UserSigChain} from './types'
 import fs from 'fs'
+import {AuthRevocableFlag} from 'stellar-sdk'
 
 const parseArgv = () =>
   yargs
@@ -9,6 +10,7 @@ const parseArgv = () =>
     .demandCommand(1)
     .options({
       file: {type: 'string', alias: 'f', describe: 'output full JSON to file'},
+      quiet: {type: 'boolean', alias: 'q', describe: 'no fancy output'},
     }).argv
 
 const output = async (res: UserSigChain, fileName: string): Promise<void> => {
@@ -35,7 +37,7 @@ const output = async (res: UserSigChain, fileName: string): Promise<void> => {
 export const main = async () => {
   const argv = parseArgv()
   const chk = new Checker()
-  if (process.stdout.isTTY) {
+  if (process.stdout.isTTY && !argv.quiet) {
     chk.interactiveReporting()
   }
   const res = await chk.check(argv._[0])

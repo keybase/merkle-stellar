@@ -25,6 +25,7 @@ import {kb} from 'kbpgp'
 import {decode} from '@msgpack/msgpack'
 import {Reporter, Step, NullReporter, InteractiveReporter} from './reporter'
 import chalk from 'chalk'
+import {PaymentCallBuilder} from 'stellar-sdk/lib/payment_call_builder'
 
 const sha256 = (b: Buffer): Sha256Hash => {
   return createHash('sha256')
@@ -171,7 +172,7 @@ export class Checker {
     return this.fetchPathAndSigsWithParams(params, reporter)
   }
 
-  async checkRootSigs(pathAndSigs: PathAndSigsJSON, expectedHash: Sha256Hash | null): Promise<TreeRoots> {
+  async checkRootSigs(pathAndSigs: PathAndSigsJSON, expectedHash: Sha256Hash | null): Promise<[TreeRoots, Sha256Hash]> {
     // First check that the hash of the signature was reflected in the
     // stellar blockchain, as expected.
     const reporter = this.reporter.step(`check hash equality for ${chalk.italic(expectedHash)}`)
@@ -199,10 +200,11 @@ export class Checker {
     if (sigPayload.compare(treeRootsEncoded) != 0) {
       throw new Error('buffer comparison failed and should have been the same')
     }
+    const rootsHash = sha256(treeRootsEncoded)
 
     // Parse and return the root sig payload
     reporter.success(expectedHash ? 'match' : 'skipped')
-    return JSON.parse(treeRootsEncoded.toString('ascii')) as TreeRoots
+    return [JSON.parse(treeRootsEncoded.toString('ascii')) as TreeRoots, rootsHash]
   }
 
   walkPathToLeaf(pathAndSigs: PathAndSigsJSON, expectedHash: Sha512Hash, uid: Uid): ChainTails {
@@ -356,11 +358,12 @@ export class Checker {
     return ret.reverse()
   }
 
-  checkSkips(latest: PathAndSigsJSON, latestTreeRoots: TreeRoots, historical: PathAndSigsJSON) {
+  checkSkips(latest: PathAndSigsJSON, latestTreeRoots: TreeRoots, historical: PathAndSigsJSON, historicalTreeRootsHash: Sha256Hash) {
     const reporter = this.reporter.step(`check skips from ${latest.root.seqno}<-${historical.root.seqno}`)
     reporter.start('')
     let currSeqno = latest.root.seqno
-    const diff = currSeqno - historical.root.seqno
+    const lastSeqno = historical.root.seqno
+    const diff = currSeqno - lastSeqno
     if (diff == 0) {
       reporter.success('equal')
       return
@@ -368,23 +371,35 @@ export class Checker {
     const seq = generateLogSequence(diff)
     let curr = latestTreeRoots
     let i = 0
+    let lastHash: Sha256Hash = null
+
     for (const jump of seq) {
       const nextSeqno = currSeqno - jump
       const nextHash = curr.body.skips['' + nextSeqno]
       if (!nextSeqno) {
         throw new Error(`server did not return a skip for seqno ${nextSeqno}`)
       }
+      if (nextSeqno == lastSeqno) {
+        lastHash = nextHash
+        break
+      }
       const nextEncoded = historical.skips[i]
       const computedHash = sha256(Buffer.from(nextEncoded, 'ascii'))
       if (computedHash != nextHash) {
-        throw new Error(`root block hash mismatch at ${nextSeqno}`)
+        throw new Error(`root block hash mismatch at ${nextSeqno} ${computedHash} != ${nextHash}`)
       }
       reporter.update(`skipped to ${nextSeqno}`)
       const next = JSON.parse(nextEncoded) as TreeRoots
       curr = next
+      currSeqno = nextSeqno
       i++
     }
-    reporter.update(`generated log sequence: ${JSON.stringify(seq)}`)
+    if (!lastHash) {
+      throw new Error(`didn't end at final sequence ${lastSeqno}`)
+    }
+    if (lastHash != historicalTreeRootsHash) {
+      throw new Error(`hash mismatch at final step ${lastSeqno}`)
+    }
     reporter.success(`done`)
     return
   }
@@ -404,19 +419,19 @@ export class Checker {
   // of site documentation.
   async checkUid(uid: Uid): Promise<UserSigChain> {
     const latestPathAndSigs = await this.fetchPathAndSigsForUid(uid)
-    const latestTreeRoots = await this.checkRootSigs(latestPathAndSigs, null)
+    const [latestTreeRoots, _] = await this.checkRootSigs(latestPathAndSigs, null)
     return this.checkCommon(latestPathAndSigs, latestTreeRoots, uid)
   }
 
   async checkCommon(latestPathAndSigs: PathAndSigsJSON, latestTreeRoots: TreeRoots, uid: Uid): Promise<UserSigChain> {
     const groveHash = await this.fetchLatestGroveHashFromStellar()
     const stellarPathAndSigs = await this.fetchPathAndSigsHistorical(uid, groveHash, latestTreeRoots.body.seqno)
-    this.checkSkips(latestPathAndSigs, latestTreeRoots, stellarPathAndSigs)
 
     const latestRootHash = latestTreeRoots.body.root
     const latestChainTails = this.walkPathToLeaf(latestPathAndSigs, latestRootHash, uid)
 
-    const stellarTreeRoots = await this.checkRootSigs(stellarPathAndSigs, groveHash)
+    const [stellarTreeRoots, stellarRootsHash] = await this.checkRootSigs(stellarPathAndSigs, groveHash)
+    this.checkSkips(latestPathAndSigs, latestTreeRoots, stellarPathAndSigs, stellarRootsHash)
     const stellarRootHash = stellarTreeRoots.body.root
     const stellarChainTails = this.walkPathToLeaf(stellarPathAndSigs, stellarRootHash, uid)
 
@@ -432,7 +447,7 @@ export class Checker {
   // of site documentation.
   async checkUsername(username: string): Promise<UserSigChain> {
     const latestPathAndSigs = await this.fetchPathAndSigsForUsername(username)
-    const latestTreeRoots = await this.checkRootSigs(latestPathAndSigs, null)
+    const [latestTreeRoots, _] = await this.checkRootSigs(latestPathAndSigs, null)
     const uid = this.extractUid(username, latestPathAndSigs, latestTreeRoots.body.legacy_uid_root)
     return this.checkCommon(latestPathAndSigs, latestTreeRoots, uid)
   }
