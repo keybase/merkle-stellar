@@ -452,7 +452,7 @@ export class TreeWalker {
     const links = await this.fetchAndCheckChainLinks(chainAssertions, uid)
     const resets = this.checkResetChain(latestPathAndSigs, latestChainTails, uid)
     const chainMaxes = this.makeChainMaxes(links, latestChainTails, stellarChainTails)
-    return {links: links, resets: resets, maxes: chainMaxes, eldest: latestChainTails[3]} as UserSigChain
+    return {links: links, resets: resets, maxes: chainMaxes, eldest: latestChainTails[3], uid: uid} as UserSigChain
   }
 
   // walkUsername traverses the stellar root down to the given username, and returns the

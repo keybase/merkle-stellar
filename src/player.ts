@@ -13,6 +13,15 @@ class ChainLink {
   sigVersion = (): number => this.json.body.version
 }
 
+class BundleWrapper {
+  bundle: ChainLinkBundle
+  link: ChainLink
+  constructor(b: ChainLinkBundle) {
+    this.bundle = b
+    this.link = new ChainLink(b.inner)
+  }
+}
+
 const hardcodedResets: {[key: string]: number} = {
   '2d5c41137d7d9108dbdaa2160ba7e200': 11,
   f1c263462dd526695c458af924977719: 8,
@@ -21,6 +30,8 @@ const hardcodedResets: {[key: string]: number} = {
   '12e124d5d1ff6179f3aab88100b93d19': 5,
   a07089770463db10994c8727177eef19: 12,
 }
+
+const isEmpty = (c: Array<any>): boolean => !c || c.length == 0
 
 export class Player {
   // When we're *in the middle of a subchain* (see the note below), there are
@@ -123,16 +134,18 @@ export class Player {
     return links
   }
 
-  playSubchain(chain: ChainLinkBundle[]): UserKeys {
-    return {} as UserKeys
+  playSubchain(chain: ChainLinkBundle[]): UserKeys | null {
+    if (isEmpty(chain)) {
+      return null
+    }
+
+    const first = new BundleWrapper(chain[0])
   }
 
   checkSubchainAgainstResetChain(chain: UserSigChain, subchain: ChainLinkBundle[]): ChainLinkBundle[] {
-    const isEmpty = (c: Array<any>): boolean => !c || c.length == 0
     const fullChain = chain.links
     const resetChain = chain.resets
     const empty: ChainLinkBundle[] = []
-
     // Empty chain, no reason for it be reset
     if (isEmpty(fullChain)) {
       return empty
@@ -172,7 +185,7 @@ export class Player {
     throw new Error("server's reset chain contradicts the cropped subchain")
   }
 
-  play(chain: UserSigChain): UserKeys {
+  play(chain: UserSigChain): UserKeys | null {
     const subchain = this.cropToRightmostSubchain(chain)
     const subchainAfterResets = this.checkSubchainAgainstResetChain(chain, subchain)
     const ret = this.playSubchain(subchainAfterResets)

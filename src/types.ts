@@ -64,6 +64,7 @@ export type UserSigChain = {
   resets: ResetChain | null
   maxes: ChainMaxes
   eldest: Kid | null
+  uid: Uid
 }
 
 export type SigChainTail = [
@@ -142,7 +143,7 @@ export type Device = {
 }
 
 export type UserKeys = {
-  puk: Kid
+  puk?: Kid
   devices: Device[]
 }
 
