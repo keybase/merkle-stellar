@@ -121,6 +121,18 @@ export type RawLinkJSON = {
 
 export type Sig2Payload = [number, number, Uint8Array, Uint8Array, number, number, boolean]
 
+export type Device = {
+  name: string
+  type: 'desktop' | 'mobile' | 'backup'
+  enc: Kid
+  sig: Kid
+}
+
+export type UserKeys = {
+  puk: Kid
+  devices: Device[]
+}
+
 export class ChainMaxes {
   sig: number
   merkle: number
