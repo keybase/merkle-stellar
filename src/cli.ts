@@ -1,5 +1,5 @@
 import yargs from 'yargs'
-import {Checker} from './check'
+import {TreeWalker} from './tree'
 import {UserSigChain} from './types'
 import fs from 'fs'
 import {AuthRevocableFlag} from 'stellar-sdk'
@@ -36,11 +36,11 @@ const output = async (res: UserSigChain, fileName: string): Promise<void> => {
 
 export const main = async () => {
   const argv = parseArgv()
-  const chk = new Checker()
+  const treeWalker = new TreeWalker()
   if (process.stdout.isTTY && !argv.quiet) {
-    chk.interactiveReporting()
+    treeWalker.interactiveReporting()
   }
-  const res = await chk.check(argv._[0])
+  const res = await treeWalker.walk(argv._[0])
   if (!res) {
     process.exit(2)
   }

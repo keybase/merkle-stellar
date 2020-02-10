@@ -1,2 +1,2 @@
-import {Checker} from './check'
-export {Checker}
+import {TreeWalker} from './tree'
+export {TreeWalker}

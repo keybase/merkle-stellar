@@ -64,7 +64,7 @@ const generateLogSequence = (n: number): number[] => {
   return ret.reverse()
 }
 
-export class Checker {
+export class TreeWalker {
   reporter: Reporter
 
   constructor() {
@@ -414,13 +414,13 @@ export class Checker {
     return ret
   }
 
-  // checkUid traverses the stellar root down to the given Uid, and returns the
+  // walkUid traverses the stellar root down to the given Uid, and returns the
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
-  async checkUid(uid: Uid): Promise<UserSigChain> {
+  async walkUid(uid: Uid): Promise<UserSigChain> {
     const latestPathAndSigs = await this.fetchPathAndSigsForUid(uid)
     const [latestTreeRoots, _] = await this.checkRootSigs(latestPathAndSigs, null)
-    return this.checkCommon(latestPathAndSigs, latestTreeRoots, uid)
+    return this.walkCommon(latestPathAndSigs, latestTreeRoots, uid)
   }
 
   makeChainMaxes(links: ChainLinkJSON[], latestChainTails: ChainTails, stellarChainTails: ChainTails): ChainMaxes {
@@ -431,7 +431,7 @@ export class Checker {
     })
   }
 
-  async checkCommon(latestPathAndSigs: PathAndSigsJSON, latestTreeRoots: TreeRoots, uid: Uid): Promise<UserSigChain> {
+  async walkCommon(latestPathAndSigs: PathAndSigsJSON, latestTreeRoots: TreeRoots, uid: Uid): Promise<UserSigChain> {
     const groveHash = await this.fetchLatestGroveHashFromStellar()
     const stellarPathAndSigs = await this.fetchPathAndSigsHistorical(uid, groveHash, latestTreeRoots.body.seqno)
 
@@ -451,14 +451,14 @@ export class Checker {
     return {links: links, resets: resets, maxes: chainMaxes} as UserSigChain
   }
 
-  // checkUsername traverses the stellar root down to the given username, and returns the
+  // walkUsername traverses the stellar root down to the given username, and returns the
   // full sigchain of the user. This function is kept simple for the basis
   // of site documentation.
-  async checkUsername(username: string): Promise<UserSigChain> {
+  async walkUsername(username: string): Promise<UserSigChain> {
     const latestPathAndSigs = await this.fetchPathAndSigsForUsername(username)
     const [latestTreeRoots, _] = await this.checkRootSigs(latestPathAndSigs, null)
     const uid = this.extractUid(username, latestPathAndSigs, latestTreeRoots.body.legacy_uid_root)
-    return this.checkCommon(latestPathAndSigs, latestTreeRoots, uid)
+    return this.walkCommon(latestPathAndSigs, latestTreeRoots, uid)
   }
 
   // top-level function to the library. Give it a username or UID
@@ -466,9 +466,9 @@ export class Checker {
   // to the leaf of the user, then fetch back their sigchain. It returns
   // the sigchain on success and null on error. It won't throw errors, it catches
   // them.
-  async check(usernameOrUid: string): Promise<UserSigChain> {
+  async walk(usernameOrUid: string): Promise<UserSigChain> {
     try {
-      const ret = await this.checkUidOrUsername(usernameOrUid)
+      const ret = await this.walkUidOrUsername(usernameOrUid)
       return ret
     } catch (e) {
       this.reporter.error(e)
@@ -476,12 +476,12 @@ export class Checker {
     }
   }
 
-  async checkUidOrUsername(usernameOrUid: string): Promise<UserSigChain> {
+  async walkUidOrUsername(usernameOrUid: string): Promise<UserSigChain> {
     if (usernameOrUid.match(/^[0-9a-f]{30}(00|19)$/)) {
-      const ret = await this.checkUid(usernameOrUid as Uid)
+      const ret = await this.walkUid(usernameOrUid as Uid)
       return ret
     }
-    const ret = await this.checkUsername(usernameOrUid)
+    const ret = await this.walkUsername(usernameOrUid)
     return ret
   }
 

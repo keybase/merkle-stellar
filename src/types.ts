@@ -140,7 +140,7 @@ export class ChainMaxes {
     if (this.isFresh()) {
       return []
     }
-    let ret: string[] = []
+    const ret: string[] = []
     if (this.sig > this.merkle) {
       ret.push(`Merkle tree is behind sigchain: ${this.sig} > ${this.merkle}`)
     }
