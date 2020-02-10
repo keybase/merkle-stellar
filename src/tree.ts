@@ -448,7 +448,7 @@ export class TreeWalker {
     const links = await this.fetchAndCheckChainLinks(chainAssertions, uid)
     const resets = this.checkResetChain(latestPathAndSigs, latestChainTails, uid)
     const chainMaxes = this.makeChainMaxes(links, latestChainTails, stellarChainTails)
-    return {links: links, resets: resets, maxes: chainMaxes} as UserSigChain
+    return {links: links, resets: resets, maxes: chainMaxes, eldest: latestChainTails[3]} as UserSigChain
   }
 
   // walkUsername traverses the stellar root down to the given username, and returns the
@@ -485,7 +485,7 @@ export class TreeWalker {
     return ret
   }
 
-  interactiveReporting() {
-    this.reporter = new InteractiveReporter()
+  setReporter(r: Reporter) {
+    this.reporter = r
   }
 }

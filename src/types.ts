@@ -63,6 +63,7 @@ export type UserSigChain = {
   links: ChainLinkJSON[]
   resets: ResetChain | null
   maxes: ChainMaxes
+  eldest: Kid | null
 }
 
 export type SigChainTail = [
@@ -82,6 +83,12 @@ export type ChainTails = [
 export type ChainLinkJSON = {
   body: {
     type: string
+    key: {
+      eldest_kid?: Kid
+      kid: Kid
+      uid: Uid
+    }
+    version: number
   }
   ctime: number
   prev: Sha256Hash
