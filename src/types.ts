@@ -60,7 +60,7 @@ export type PathAndSigsJSON = {
 export type ResetChainTail = [number, Sha512Hash]
 
 export type UserSigChain = {
-  links: ChainLinkJSON[]
+  links: ChainLinkBundle[]
   resets: ResetChain | null
   maxes: ChainMaxes
   eldest: Kid | null
@@ -94,6 +94,12 @@ export type ChainLinkJSON = {
   prev: Sha256Hash
   seqno: number
   tag: 'signature'
+}
+
+export type ChainLinkBundle = {
+  inner: ChainLinkJSON
+  outer: Sig2Payload
+  sig: string
 }
 
 export type TreeRoots = {

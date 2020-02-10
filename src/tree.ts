@@ -4,7 +4,7 @@ import {
   Sha256Hash,
   Sha512Hash,
   PathAndSigsJSON,
-  ChainLinkJSON,
+  ChainLinkBundle,
   KeybaseSig,
   Sig2Payload,
   TreeRoots,
@@ -16,6 +16,7 @@ import {
   SigChainTail,
   RawLinkJSON,
   ChainMaxes,
+  ChainLinkJSON,
 } from './types'
 import {horizonServerURI, keybaseStellarAddress, keybaseRootKid, keybaseAPIServerURI} from './constants'
 import {URLSearchParams} from 'url'
@@ -238,7 +239,7 @@ export class TreeWalker {
     throw new Error('walked off the end of the tree')
   }
 
-  checkLink(rawLink: RawLinkJSON, expectedHash: Sha256Hash | null, i: number): {payload: ChainLinkJSON; prev: Sha256Hash} {
+  checkLink(rawLink: RawLinkJSON, expectedHash: Sha256Hash | null, i: number): [ChainLinkBundle, Sha256Hash] {
     // Sig version 1 and 2 both have a "payload" as a JSON object,
     // which signifies what the signature was attesting to.
     const innerString = rawLink.payload_json
@@ -246,6 +247,7 @@ export class TreeWalker {
     const version = rawLink.sig_version
     const innerHash = sha256(Buffer.from(innerString, 'ascii'))
     let gotHash = innerHash
+    let outer: Sig2Payload = null
 
     // Sig version 2 uses an additional level of indirection for the sake
     // of bandiwdth savings. An "outer" link points to the "inner"
@@ -254,7 +256,7 @@ export class TreeWalker {
       const object = decode(Buffer.from(rawLink.sig, 'base64')) as KeybaseSig
       const outerBuf = object.body.payload
       gotHash = sha256(outerBuf)
-      const outer = decode(outerBuf) as Sig2Payload
+      outer = decode(outerBuf) as Sig2Payload
       const prev = uint8ArrayToHex(outer[2])
       if (prev != inner.prev) {
         throw new Error(`bad prev/prev mismatch at position ${i}`)
@@ -273,7 +275,9 @@ export class TreeWalker {
     if (inner.seqno != i) {
       throw new Error(`bad seqno ${inner.seqno} at position ${i}`)
     }
-    return {payload: inner, prev: inner.prev}
+
+    const bundle: ChainLinkBundle = {inner: inner, outer: outer, sig: rawLink.sig}
+    return [bundle, inner.prev]
   }
 
   checkResetChain(pathAndSigs: PathAndSigsJSON, chainTails: ChainTails, uid: Uid): ResetChain | null {
@@ -331,12 +335,12 @@ export class TreeWalker {
 
   // fetch the sig chain for the give user; assert that the chain ends in the
   // given hash. Return the JSON of the links, from oldest to newest.
-  async fetchAndCheckChainLinks(assertions: Map<number, Sha256Hash>, uid: Uid): Promise<ChainLinkJSON[]> {
+  async fetchAndCheckChainLinks(assertions: Map<number, Sha256Hash>, uid: Uid): Promise<ChainLinkBundle[]> {
     const reporter = this.reporter.step(`fetch sigchain from ${chalk.bold('keybase')} for ${chalk.italic(uid)}`)
     reporter.start('fetch raw chain')
     const sigs = await this.fetchRawChain(uid, 0, reporter)
     const numSigs = sigs.length
-    const ret: ChainLinkJSON[] = []
+    const ret: ChainLinkBundle[] = []
 
     // We usually have an assertion of link seqno -> hash for the last link, but
     // no always, there could have been a race
@@ -350,9 +354,9 @@ export class TreeWalker {
         throw new Error(`got wrong expected hash (via tree) at ${seqno}`)
       }
 
-      const {payload, prev} = this.checkLink(sigs[index], expectedHash, seqno)
+      const [bundle, prev] = this.checkLink(sigs[index], expectedHash, seqno)
       expectedHash = prev
-      ret.push(payload)
+      ret.push(bundle)
     }
     reporter.success(`got back ${ret.length} links`)
     return ret.reverse()
@@ -423,7 +427,7 @@ export class TreeWalker {
     return this.walkCommon(latestPathAndSigs, latestTreeRoots, uid)
   }
 
-  makeChainMaxes(links: ChainLinkJSON[], latestChainTails: ChainTails, stellarChainTails: ChainTails): ChainMaxes {
+  makeChainMaxes(links: ChainLinkBundle[], latestChainTails: ChainTails, stellarChainTails: ChainTails): ChainMaxes {
     return new ChainMaxes({
       sig: links ? links.length : 0,
       merkle: latestChainTails[1][0],

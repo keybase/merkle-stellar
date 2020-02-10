@@ -1,4 +1,4 @@
-import {UserSigChain, UserKeys, ChainLinkJSON, ResetChain, Kid, Uid} from './types'
+import {UserSigChain, UserKeys, ChainLinkJSON, ResetChain, Kid, Uid, ChainLinkBundle} from './types'
 
 class ChainLink {
   json: ChainLinkJSON
@@ -13,7 +13,7 @@ class ChainLink {
   sigVersion = (): number => this.json.body.version
 }
 
-var hardcodedResets: {[key: string]: number} = {
+const hardcodedResets: {[key: string]: number} = {
   '2d5c41137d7d9108dbdaa2160ba7e200': 11,
   f1c263462dd526695c458af924977719: 8,
   '8dbf0f1617e285befa93d3da54b68419': 8,
@@ -68,7 +68,7 @@ export class Player {
     }
 
     // case 3
-    if (curr.eldestKid() != prev.eldestKid()) {
+    if (curr.eldestKid() && prev.eldestKid() && curr.eldestKid() != prev.eldestKid()) {
       return true
     }
 
@@ -83,10 +83,10 @@ export class Player {
 
   // cropToRightmostSubchain takes the given set of chain links, and then limits the tail
   // of the chain to just those that correspond to the eldest key given by `eldest`.
-  cropToRightmostSubchain(chain: UserSigChain): ChainLinkJSON[] {
+  cropToRightmostSubchain(chain: UserSigChain): ChainLinkBundle[] {
     const links = chain.links
     const eldest = chain.eldest
-    const empty = [] as ChainLinkJSON[]
+    const empty = [] as ChainLinkBundle[]
     if (links.length === 0) {
       return empty
     }
@@ -94,8 +94,9 @@ export class Player {
     // Check whether the eldest KID doesn't match the latest link. That means
     // the account has just been reset, and so as with a new account, there is
     // no current subchain.
-    const lastLink = links[links.length - 1]
-    if (new ChainLink(lastLink).eldestKid() != eldest) {
+    const lastLink = new ChainLink(links[links.length - 1].inner)
+    const firstLink = new ChainLink(links[0].inner)
+    if (lastLink.eldestKid() != eldest) {
       return empty
     }
 
@@ -103,8 +104,8 @@ export class Player {
     // link, and we need to loop backwards through every pair of links we have.
     // If we find a subchain start, return that subslice of links.
     for (let i = links.length - 1; i > 0; i--) {
-      const curr = links[i]
-      const prev = links[i - 1]
+      const curr = links[i].inner
+      const prev = links[i - 1].inner
       const isStart = this.isSubchainStart(curr, prev)
       if (isStart) {
         return links.slice(i)
@@ -114,7 +115,7 @@ export class Player {
     // user has no resets, and we'll return the whole chain. Sanity check that
     // we actually loaded everything back to seqno 1. (Anything else would be
     // some kind of bug in chain loading.)
-    if (new ChainLink(links[0]).seqno() != 1) {
+    if (firstLink.seqno() != 1) {
       throw new Error('chain ended unexpectedly before seqno 1 in GetCurrentSubchain')
     }
 
@@ -122,18 +123,59 @@ export class Player {
     return links
   }
 
-  playSubchain(chain: ChainLinkJSON[]): UserKeys {
+  playSubchain(chain: ChainLinkBundle[]): UserKeys {
     return {} as UserKeys
   }
 
-  checkSubchainAgainstResetChain(subchain: ChainLinkJSON[], resetChain: ResetChain) {
-    return
+  checkSubchainAgainstResetChain(chain: UserSigChain, subchain: ChainLinkBundle[]): ChainLinkBundle[] {
+    const isEmpty = (c: Array<any>): boolean => !c || c.length == 0
+    const fullChain = chain.links
+    const resetChain = chain.resets
+    const empty: ChainLinkBundle[] = []
+
+    // Empty chain, no reason for it be reset
+    if (isEmpty(fullChain)) {
+      return empty
+    }
+
+    if (isEmpty(subchain) && isEmpty(resetChain)) {
+      throw new Error('need a reset if our subchain is nil')
+    }
+
+    if (isEmpty(subchain)) {
+      return subchain
+    }
+
+    const first = new ChainLink(subchain[0].inner)
+    const last = new ChainLink(subchain[subchain.length - 1].inner)
+
+    if (isEmpty(resetChain) && first.seqno() != 1) {
+      throw new Error("got a reset account, but didn't have a reset chain")
+    }
+
+    if (isEmpty(resetChain)) {
+      return subchain
+    }
+
+    const lastReset = resetChain[resetChain.length - 1]
+    const prevSeqno = lastReset.prev.public_seqno
+
+    if (first.seqno() == prevSeqno + 1) {
+      return subchain
+    }
+
+    // We were just reset on the server-side, so we throw away the last subchain
+    if (last.seqno() == prevSeqno) {
+      return empty
+    }
+
+    throw new Error("server's reset chain contradicts the cropped subchain")
   }
 
   play(chain: UserSigChain): UserKeys {
     const subchain = this.cropToRightmostSubchain(chain)
-    this.checkSubchainAgainstResetChain(subchain, chain.resets)
-    const ret = this.playSubchain(subchain)
+    const subchainAfterResets = this.checkSubchainAgainstResetChain(chain, subchain)
+    const ret = this.playSubchain(subchainAfterResets)
     return ret
   }
 }
