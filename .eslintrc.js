@@ -13,7 +13,7 @@ module.exports = {
   },
   rules: {
     '@typescript-eslint/ban-ts-ignore': 'off', // we use these in our .ts tests to try to do bad things
-    "@typescript-eslint/camelcase": 'off',
+    '@typescript-eslint/camelcase': 'off',
     'no-var': 'error',
     'prefer-const': 'error',
     'no-duplicate-imports': 0,
