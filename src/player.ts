@@ -1,4 +1,5 @@
 import {UserSigChain, UserKeys, ChainLinkJSON, ResetChain, Kid, Uid, ChainLinkBundle} from './types'
+import {KeyRing} from './keys'
 
 class ChainLink {
   json: ChainLinkJSON
@@ -185,7 +186,7 @@ export class Player {
     throw new Error("server's reset chain contradicts the cropped subchain")
   }
 
-  play(chain: UserSigChain): UserKeys | null {
+  play(chain: UserSigChain, keyring: KeyRing): UserKeys | null {
     const subchain = this.cropToRightmostSubchain(chain)
     const subchainAfterResets = this.checkSubchainAgainstResetChain(chain, subchain)
     const ret = this.playSubchain(subchainAfterResets)

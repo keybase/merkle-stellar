@@ -101,6 +101,7 @@ export type ChainLinkBundle = {
   inner: ChainLinkJSON
   outer: Sig2Payload
   sig: string
+  kid: Kid
 }
 
 export type TreeRoots = {
@@ -131,6 +132,7 @@ export type RawLinkJSON = {
   payload_json: string
   sig: string
   sig_version: number
+  kid: Kid
 }
 
 export type Sig2Payload = [number, number, Uint8Array, Uint8Array, number, number, boolean]

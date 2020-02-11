@@ -4,6 +4,7 @@ import {InteractiveReporter, NullReporter} from './reporter'
 import {Reporter} from './reporter'
 import fs from 'fs'
 import {UserSigChain, UserKeys} from './types'
+import {KeyRing} from './keys'
 
 const output = async (res: any, fileName: string): Promise<void> => {
   if (!!fileName || process.stdout.isTTY) {
@@ -62,8 +63,10 @@ export class Runner {
     if (this.opts.tree) {
       return userSigChain
     }
+    const keyring = new KeyRing(userSigChain.uid)
+    await keyring.fetch()
     const player = new Player()
-    const userKeys = player.play(userSigChain)
+    const userKeys = player.play(userSigChain, keyring)
     return userKeys
   }
 }

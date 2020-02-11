@@ -85,7 +85,7 @@ export class KeyRing {
   }
 
   addPgpKey(vk: verify.GenericKey, raw: string) {
-    const kid = vk.kid() as Ki
+    const kid = vk.kid() as Kid
     const ks = this.pgpKeys.get(kid)
     if (ks) {
       const key = new PGPKey(vk, raw)
