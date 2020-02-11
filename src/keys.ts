@@ -1,12 +1,26 @@
 import {URLSearchParams} from 'url'
 import axios from 'axios'
 import {keybaseAPIServerURI} from './constants'
-import {Uid, Kid, Sha256Hash, Sha512Hash} from './types'
+import {
+  Uid,
+  Kid,
+  Sha256Hash,
+  DeviceId,
+  Device,
+  SigIdMapKey,
+  RevokeJSON,
+  SigId,
+  EncSigPair,
+  DeviceJSON,
+  deviceFromJSON,
+  PerUserKeyJSON,
+  PerUserKey,
+} from './types'
 import {verify} from 'kbpgp'
-import {sha256} from './util'
+import {sha256, sigIdToMapKey} from './util'
 
 interface GenericKey {
-  verify(s: string): Promise<Buffer>
+  verify(s: string): Promise<[Buffer, Buffer]>
 }
 
 export class PGPKey {
@@ -41,7 +55,7 @@ export class PGPKeySet implements GenericKey {
     this.current = h
   }
 
-  async verify(s: string): Promise<Buffer> {
+  async verify(s: string): Promise<[Buffer, Buffer]> {
     if (this.current) {
       const key = this.byFullHash.get(this.current)
       const ret = await key.key.verify(s)
@@ -50,7 +64,7 @@ export class PGPKeySet implements GenericKey {
 
     for (const key of this.byFullHash.values()) {
       try {
-        const ret = await key.key.verify(s)
+        const ret = await key.key.verify(s, {time_travel: true, now: 1})
         return ret
       } catch (e) {}
     }
@@ -67,7 +81,7 @@ export class NaClKey implements GenericKey {
     this.kid = k.kid() as Kid
   }
 
-  async verify(s: string): Promise<Buffer> {
+  async verify(s: string): Promise<[Buffer, Buffer]> {
     const ret = await this.key.verify(s)
     return ret
   }
@@ -99,7 +113,7 @@ export class KeyRing {
   }
 
   async addKey(s: string): Promise<void> {
-    const vk = await verify.importKey(s)
+    const vk = await verify.importKey(s, {time_travel: true})
     if (vk.isPGP()) {
       return this.addPgpKey(vk, s)
     }
@@ -108,13 +122,14 @@ export class KeyRing {
     return
   }
 
-  async verify(kid: Kid, sig: string): Promise<Buffer> {
+  async verify(kid: Kid, sig: string): Promise<[Buffer, SigId]> {
     const key = this.byKid.get(kid)
     if (!key) {
       throw new Error('key not found in keyring')
     }
-    const ret = await key.verify(sig)
-    return ret
+    const [payload, raw] = await key.verify(sig)
+    const sigId = (sha256(raw) as string) as SigId
+    return [payload, sigId]
   }
 
   async fetch(): Promise<void> {
@@ -123,8 +138,117 @@ export class KeyRing {
     const response = await axios.get(url)
     const keys = response.data.them.public_keys.all_bundles as string[]
     for (const raw of keys) {
-      this.addKey(raw)
+      await this.addKey(raw)
     }
     return
+  }
+}
+
+export const isNaClSigKey = (kid: Kid): boolean => kid.slice(0, 4) == '0120'
+export const isNaClEncKey = (kid: Kid): boolean => kid.slice(0, 4) == '0121'
+export const isPgpKey = (kid: Kid): boolean => !isNaClSigKey(kid) || !isNaClEncKey(kid)
+
+export class KeyFamily {
+  uid: Uid
+  devices: Map<DeviceId, Device>
+  pgps: Set<Kid>
+  byKid: Map<Kid, DeviceId>
+  bySig: Map<SigIdMapKey, Kid[]>
+  puk?: PerUserKey
+  eldest: Kid
+
+  constructor(u: Uid, eldest: Kid) {
+    this.uid = u
+    this.eldest = eldest
+    this.devices = new Map<DeviceId, Device>()
+    this.pgps = new Set<Kid>()
+    this.byKid = new Map<Kid, DeviceId>()
+    this.bySig = new Map<SigIdMapKey, Kid[]>()
+  }
+
+  revokeDevice(deviceId: DeviceId, kid: Kid) {
+    const device = this.devices.get(deviceId)
+    if (device && device.keys.sig == kid) {
+      this.devices.delete(deviceId)
+    }
+  }
+
+  addNaClSibkey(k: Kid, sig: SigId, d: DeviceJSON) {
+    this.bySig.set(sigIdToMapKey(sig), [k])
+    const device = deviceFromJSON(d, k)
+    this.byKid.set(k, device.id)
+    this.devices.set(device.id, device)
+  }
+
+  addNaClSubkey(k: Kid, sigId: SigId, d: DeviceJSON) {
+    const mapKey = sigIdToMapKey(sigId)
+    const device = this.devices.get(d.id)
+    if (device) {
+      device.keys.enc = k
+    }
+    this.byKid.set(k, d.id)
+    this.bySig.set(mapKey, [k])
+  }
+
+  addPerUserKey(puk: PerUserKey, sigId: SigId) {
+    this.puk = puk
+    const mapKey = sigIdToMapKey(sigId)
+    this.bySig.set(mapKey, [puk.keys.sig, puk.keys.enc])
+  }
+
+  addPgpSibkey(k: Kid, sig: SigId) {
+    this.bySig.set(sigIdToMapKey(sig), [k])
+    this.pgps.add(k)
+  }
+
+  addPgpEldestKey(k: Kid) {
+    this.pgps.add(k)
+  }
+
+  isActive = (kid: Kid): boolean => this.pgps.has(kid) || !!this.byKid.get(kid)
+
+  revokeKey(kid: Kid) {
+    const deviceId = this.byKid.get(kid)
+    if (deviceId) {
+      this.revokeDevice(deviceId, kid)
+      this.byKid.delete(kid)
+    }
+    const pgpKey = this.pgps.has(kid)
+    if (pgpKey) {
+      this.pgps.delete(kid)
+    }
+    if (this.puk && (this.puk.keys.enc == kid || this.puk.keys.sig == kid)) {
+      this.puk = null
+    }
+  }
+
+  revokeSig(sigID: SigId) {
+    const mapKey = sigIdToMapKey(sigID)
+    const kids = this.bySig.get(mapKey)
+    if (!kids || kids.length == 0) {
+      return
+    }
+    for (const kid of kids) {
+      this.revokeKey(kid)
+    }
+    this.bySig.delete(mapKey)
+  }
+
+  revokeBatch(revokes: RevokeJSON | null) {
+    if (!revokes) {
+      return
+    }
+    if (revokes.sig_id) {
+      this.revokeSig(revokes.sig_id)
+    }
+    for (const sig of revokes.sig_ids || []) {
+      this.revokeSig(sig)
+    }
+    if (revokes.kid) {
+      this.revokeKey(revokes.kid)
+    }
+    for (const key of revokes.kids || []) {
+      this.revokeKey(key)
+    }
   }
 }

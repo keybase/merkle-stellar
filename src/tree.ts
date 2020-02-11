@@ -276,7 +276,7 @@ export class TreeWalker {
       throw new Error(`bad seqno ${inner.seqno} at position ${i}`)
     }
 
-    const bundle: ChainLinkBundle = {inner: inner, outer: outer, sig: rawLink.sig, kid: rawLink.kid}
+    const bundle: ChainLinkBundle = {inner: inner, outer: outer, sig: rawLink.sig, kid: rawLink.kid, payloadHash: gotHash}
     return [bundle, inner.prev]
   }
 

@@ -1,5 +1,22 @@
-import {UserSigChain, UserKeys, ChainLinkJSON, ResetChain, Kid, Uid, ChainLinkBundle} from './types'
-import {KeyRing} from './keys'
+import {
+  UserSigChain,
+  UserKeys,
+  ChainLinkJSON,
+  DeviceJSON,
+  Kid,
+  Uid,
+  ChainLinkBundle,
+  RevokeJSON,
+  SigId,
+  SibkeyJSON,
+  SubkeyJSON,
+  PerUserKeyJSON,
+  EncSigPair,
+  perUserKeyFromJSON,
+} from './types'
+import {KeyRing as Keyring, KeyFamily, isNaClSigKey, isPgpKey} from './keys'
+import {sha256} from './util'
+import kbpgp from 'kbpgp'
 
 class ChainLink {
   json: ChainLinkJSON
@@ -10,8 +27,36 @@ class ChainLink {
   eldestKid = (): Kid | null => this.json.body.key.eldest_kid || this.json.body.key.kid
   uid = (): Uid => this.json.body.key.uid
   seqno = (): number => this.json.seqno
-  isEldest = (): boolean => this.json.body.type == 'eldest'
+  type = (): string => this.json.body.type
+  isEldest = (): boolean => this.type() == 'eldest'
   sigVersion = (): number => this.json.body.version
+  revokes = (): RevokeJSON | null => this.json.body.revoke
+  device = (): DeviceJSON | null => this.json.body.device
+  sibkey = (): SibkeyJSON | null => this.json.body.sibkey
+  subkey = (): SubkeyJSON | null => this.json.body.subkey
+  perUserKey = (): PerUserKeyJSON | null => this.json.body.per_user_key
+
+  sibkeyPayloadWithNulledReverseSig = (): string => {
+    const rs = this.json.body.sibkey?.reverse_sig
+    if (!rs) {
+      throw new Error('no reverse sig slot to null out')
+    }
+    this.json.body.sibkey.reverse_sig = null
+    const ret = kbpgp.util.json_stringify_sorted(this.json)
+    this.json.body.sibkey.reverse_sig = rs
+    return ret
+  }
+
+  perUserKeyPayloadWithNulledReverseSig = (): string => {
+    const rs = this.json.body.per_user_key?.reverse_sig
+    if (!rs) {
+      throw new Error('no reverse sig slot to null out')
+    }
+    this.json.body.per_user_key.reverse_sig = null
+    const ret = kbpgp.util.json_stringify_sorted(this.json)
+    this.json.body.per_user_key.reverse_sig = rs
+    return ret
+  }
 }
 
 class BundleWrapper {
@@ -20,6 +65,16 @@ class BundleWrapper {
   constructor(b: ChainLinkBundle) {
     this.bundle = b
     this.link = new ChainLink(b.inner)
+  }
+
+  async verify(kr: Keyring): Promise<[Kid, SigId]> {
+    const kid = this.bundle.kid
+    const [payload, sigId] = await kr.verify(kid, this.bundle.sig)
+    const verifiedHash = sha256(payload)
+    if (verifiedHash != this.bundle.payloadHash) {
+      throw new Error("verified payload didn't match expectations")
+    }
+    return [kid, sigId]
   }
 }
 
@@ -135,12 +190,130 @@ export class Player {
     return links
   }
 
-  playSubchain(chain: ChainLinkBundle[]): UserKeys | null {
+  async playEldestLink(uid: Uid, firstRaw: ChainLinkBundle, keyring: Keyring, expectedEldest: Kid): Promise<KeyFamily> {
+    const first = new BundleWrapper(firstRaw)
+    const type = first.link.type()
+    const device = first.link.device()
+    const isEldestLink = type == 'eldest'
+    const [eldestKid, sigId] = await first.verify(keyring)
+    if (eldestKid != expectedEldest) {
+      throw new Error('got wrong eldest Kid in first link')
+    }
+    const ret = new KeyFamily(uid, eldestKid)
+    if (isNaClSigKey(eldestKid)) {
+      if (!isEldestLink) {
+        throw new Error('modern keys should have an eldest link at beginning of subchain')
+      }
+      ret.addNaClSibkey(eldestKid, sigId, device)
+    } else if (isPgpKey(eldestKid)) {
+      ret.addPgpEldestKey(eldestKid)
+    }
+    return ret
+  }
+
+  async playSibkey(link: BundleWrapper, sigId: SigId, keyring: Keyring, keyFamily: KeyFamily): Promise<void> {
+    const sibkey = link.link.sibkey()
+    if (!sibkey) {
+      throw new Error('missing sibkey section')
+    }
+    const kid = sibkey.kid
+    const reverseSig = sibkey.reverse_sig
+    const [reversePayloadBuffer, _] = await keyring.verify(kid, reverseSig)
+    const expected = link.link.sibkeyPayloadWithNulledReverseSig()
+    if (reversePayloadBuffer.toString('ascii') != expected) {
+      throw new Error('reverse payload mismatch after nulling out sig')
+    }
+
+    if (isNaClSigKey(kid)) {
+      const device = link.link.device()
+      keyFamily.addNaClSibkey(kid, sigId, device)
+    } else if (isPgpKey(kid)) {
+      keyFamily.addPgpSibkey(kid, sigId)
+    } else {
+      throw new Error('unexpected type of sibkey found')
+    }
+
+    return
+  }
+
+  playSubkey(link: BundleWrapper, sigId: SigId, keyFamily: KeyFamily): void {
+    const subkey = link.link.subkey()
+    if (!subkey) {
+      throw new Error('missing sibkey section')
+    }
+    const kid = subkey.kid
+    const device = link.link.device()
+    keyFamily.addNaClSubkey(kid, sigId, device)
+  }
+
+  async playPgpUpdate(link: BundleWrapper, keyring: Keyring, keyFamily: KeyFamily): Promise<void> {
+    return
+  }
+
+  async playPerUserKey(link: BundleWrapper, sigId: SigId, keyring: Keyring, keyFamily: KeyFamily): Promise<void> {
+    const pukJSON = link.link.perUserKey()
+    if (!pukJSON) {
+      throw new Error('missing per_user_key section')
+    }
+    const puk = perUserKeyFromJSON(pukJSON)
+    const reverseSig = pukJSON.reverse_sig
+    const verifyKey = await kbpgp.verify.importKey(puk.keys.sig, null)
+    const [reversePayloadBuffer, _] = await verifyKey.verify(reverseSig, null)
+    const expected = link.link.perUserKeyPayloadWithNulledReverseSig()
+    if (reversePayloadBuffer.toString('ascii') != expected) {
+      throw new Error('reverse sig mismatch in PUK after nulling out sig')
+    }
+    keyFamily.addPerUserKey(puk, sigId)
+    return
+  }
+
+  async verifyLink(link: BundleWrapper, keyring: Keyring, keyFamily: KeyFamily): Promise<SigId> {
+    const [kid, sigId] = await link.verify(keyring)
+    if (!keyFamily.isActive(kid)) {
+      throw new Error(`key wasn't active ${kid} for signature`)
+    }
+    return sigId
+  }
+
+  async playSubchain(uid: Uid, chain: ChainLinkBundle[], keyring: Keyring, expectedEldest: Kid | null): Promise<UserKeys | null> {
     if (isEmpty(chain)) {
       return null
     }
+    if (!expectedEldest) {
+      throw new Error('got an empty chain but we expected an eldest kid')
+    }
 
-    const first = new BundleWrapper(chain[0])
+    const keyFamily = await this.playEldestLink(uid, chain[0], keyring, expectedEldest)
+
+    let i = 1
+    for (const raw of chain.slice(1)) {
+      const link = new BundleWrapper(raw)
+
+      const sigId = await this.verifyLink(link, keyring, keyFamily)
+      const type = link.link.type()
+      switch (type) {
+        case 'sibkey':
+          await this.playSibkey(link, sigId, keyring, keyFamily)
+          break
+        case 'subkey':
+          this.playSubkey(link, sigId, keyFamily)
+          break
+        case 'pgp_update':
+          this.playPgpUpdate(link, keyring, keyFamily)
+          break
+        case 'per_user_key':
+          await this.playPerUserKey(link, sigId, keyring, keyFamily)
+          break
+        case 'eldest':
+          throw new Error(`unexpected eldest in middle of subchain ${i}`)
+      }
+      const revokes = link.link.revokes()
+      keyFamily.revokeBatch(revokes)
+      i++
+    }
+    console.log(keyFamily)
+
+    return null
   }
 
   checkSubchainAgainstResetChain(chain: UserSigChain, subchain: ChainLinkBundle[]): ChainLinkBundle[] {
@@ -186,10 +359,10 @@ export class Player {
     throw new Error("server's reset chain contradicts the cropped subchain")
   }
 
-  play(chain: UserSigChain, keyring: KeyRing): UserKeys | null {
+  async play(chain: UserSigChain, keyring: Keyring): Promise<UserKeys | null> {
     const subchain = this.cropToRightmostSubchain(chain)
     const subchainAfterResets = this.checkSubchainAgainstResetChain(chain, subchain)
-    const ret = this.playSubchain(subchainAfterResets)
+    const ret = await this.playSubchain(chain.uid, subchainAfterResets, keyring, chain.eldest)
     return ret
   }
 }

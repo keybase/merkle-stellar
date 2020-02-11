@@ -12,6 +12,9 @@ export type Username = NominalType<string, 'username'>
 export type Sha256Hash = NominalType<string, 'sha256hash'>
 export type Sha512Hash = NominalType<string, 'sha512hash'>
 export type StellarPublicKey = NominalType<string, 'stellarPublicKey'>
+export type DeviceId = NominalType<string, 'deviceId'>
+export type SigId = NominalType<string, 'sigId'>
+export type SigIdMapKey = NominalType<string, 'sigIdMapKey'>
 
 export type PathNodeJSON = {
   prefix: string
@@ -81,6 +84,38 @@ export type ChainTails = [
   ResetChainTail | null
 ]
 
+export type RevokeJSON = {
+  sig_id?: SigId
+  sig_ids?: SigId[]
+  kid: Kid
+  kids?: Kid[]
+}
+
+export type DeviceType = 'mobile' | 'backup' | 'desktop'
+
+export type DeviceJSON = {
+  id: DeviceId
+  name: string
+  type: DeviceType
+}
+
+export type SibkeyJSON = {
+  kid: Kid
+  reverse_sig: string
+}
+
+export type SubkeyJSON = {
+  kid: Kid
+  parent_kid: Kid
+}
+
+export type PerUserKeyJSON = {
+  encryption_kid: Kid
+  generation: number
+  signing_kid: Kid
+  reverse_sig: string
+}
+
 export type ChainLinkJSON = {
   body: {
     type: string
@@ -89,7 +124,12 @@ export type ChainLinkJSON = {
       kid: Kid
       uid: Uid
     }
+    revoke?: RevokeJSON
+    device?: DeviceJSON
     version: number
+    sibkey?: SibkeyJSON
+    subkey?: SubkeyJSON
+    per_user_key?: PerUserKeyJSON
   }
   ctime: number
   prev: Sha256Hash
@@ -102,6 +142,7 @@ export type ChainLinkBundle = {
   outer: Sig2Payload
   sig: string
   kid: Kid
+  payloadHash: Sha256Hash
 }
 
 export type TreeRoots = {
@@ -137,15 +178,36 @@ export type RawLinkJSON = {
 
 export type Sig2Payload = [number, number, Uint8Array, Uint8Array, number, number, boolean]
 
-export type Device = {
-  name: string
-  type: 'desktop' | 'mobile' | 'backup'
+export type EncSigPair = {
   enc: Kid
   sig: Kid
 }
 
+export type PerUserKey = {
+  keys: EncSigPair
+  generation: number
+}
+
+export const perUserKeyFromJSON = (p: PerUserKeyJSON): PerUserKey => {
+  return {
+    keys: {sig: p.signing_kid, enc: p.encryption_kid} as EncSigPair,
+    generation: p.generation,
+  } as PerUserKey
+}
+
+export type Device = {
+  name: string
+  id: DeviceId
+  type: DeviceType
+  keys: EncSigPair
+}
+
+export const deviceFromJSON = (d: DeviceJSON, sigKid: Kid): Device => {
+  return {name: d.name, id: d.id, type: d.type, keys: {sig: sigKid} as EncSigPair} as Device
+}
+
 export type UserKeys = {
-  puk?: Kid
+  puk?: EncSigPair
   devices: Device[]
 }
 

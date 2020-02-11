@@ -66,7 +66,7 @@ export class Runner {
     const keyring = new KeyRing(userSigChain.uid)
     await keyring.fetch()
     const player = new Player()
-    const userKeys = player.play(userSigChain, keyring)
+    const userKeys = await player.play(userSigChain, keyring)
     return userKeys
   }
 }
