@@ -97,3 +97,7 @@ export class InteractiveReporter implements Reporter {
     }
   }
 }
+
+export const newReporter = (r: Reporter | null): Reporter => {
+  return r ? r : new NullReporter()
+}

@@ -25,7 +25,7 @@ import {promisify} from 'util'
 import {createHash} from 'crypto'
 import {kb} from 'kbpgp'
 import {decode} from '@msgpack/msgpack'
-import {Reporter, Step, NullReporter, InteractiveReporter} from './reporter'
+import {Reporter, Step, newReporter} from './reporter'
 import chalk from 'chalk'
 
 const sha256 = (b: Buffer): Sha256Hash => {
@@ -68,8 +68,8 @@ const generateLogSequence = (n: number): number[] => {
 export class TreeWalker {
   reporter: Reporter
 
-  constructor() {
-    this.reporter = new NullReporter()
+  constructor(r?: Reporter) {
+    this.reporter = newReporter(r)
   }
 
   async fetchLatestGroveHashFromStellar(): Promise<Sha256Hash> {
@@ -487,9 +487,5 @@ export class TreeWalker {
     }
     const ret = await this.walkUsername(usernameOrUid)
     return ret
-  }
-
-  setReporter(r: Reporter) {
-    this.reporter = r
   }
 }

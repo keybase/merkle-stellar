@@ -15,9 +15,12 @@ import {
   deviceFromJSON,
   PerUserKeyJSON,
   PerUserKey,
+  Sha512Hash,
 } from './types'
 import {verify} from 'kbpgp'
 import {sha256, sigIdToMapKey} from './util'
+import {Reporter, newReporter} from './reporter'
+import chalk = require('chalk')
 
 interface GenericKey {
   verify(s: string): Promise<[Buffer, Buffer]>
@@ -33,11 +36,17 @@ export class PGPKey {
     this.key = k
     this.fullHash = sha256(Buffer.from(r, 'ascii')) as Sha256Hash
   }
+
+  async verify(s: string): Promise<[Buffer, Buffer]> {
+    const opts = {time_travel: true, now: 1} as verify.Opts
+    return this.key.verify(s, opts)
+  }
 }
 
 export class PGPKeySet implements GenericKey {
   kid: Kid
   byFullHash: Map<Sha256Hash, PGPKey>
+  last: PGPKey
   current: Sha256Hash | null
 
   constructor(k: verify.GenericKey, r: string) {
@@ -49,22 +58,35 @@ export class PGPKeySet implements GenericKey {
 
   insert(key: PGPKey) {
     this.byFullHash.set(key.fullHash, key)
+    this.last = key
   }
 
   select(h: Sha256Hash) {
+    const k = this.byFullHash.get(h)
+    if (!k) {
+      throw new Error("cannot select PGP key in update, didn't have it in keyring")
+    }
     this.current = h
+  }
+
+  exportKey(): string {
+    let key = this.last
+    if (this.current) {
+      key = this.byFullHash.get(this.current)
+    }
+    return key.raw
   }
 
   async verify(s: string): Promise<[Buffer, Buffer]> {
     if (this.current) {
       const key = this.byFullHash.get(this.current)
-      const ret = await key.key.verify(s)
+      const ret = await key.verify(s)
       return ret
     }
 
     for (const key of this.byFullHash.values()) {
       try {
-        const ret = await key.key.verify(s, {time_travel: true, now: 1})
+        const ret = await key.verify(s)
         return ret
       } catch (e) {}
     }
@@ -91,11 +113,21 @@ export class KeyRing {
   uid: Uid
   byKid: Map<Kid, GenericKey>
   pgpKeys: Map<Kid, PGPKeySet>
+  reporter: Reporter
 
-  constructor(u: Uid) {
+  constructor(u: Uid, r?: Reporter) {
+    this.reporter = newReporter(r)
     this.uid = u
     this.byKid = new Map<Kid, GenericKey>()
     this.pgpKeys = new Map<Kid, PGPKeySet>()
+  }
+
+  selectPgpKey(k: Kid, h: Sha256Hash) {
+    const key = this.pgpKeys.get(k)
+    if (!key) {
+      throw new Error('cannot select PGP key, KID not found')
+    }
+    key.select(h)
   }
 
   addPgpKey(vk: verify.GenericKey, raw: string) {
@@ -110,6 +142,14 @@ export class KeyRing {
     this.pgpKeys.set(kid, newKeySet)
     this.byKid.set(kid, newKeySet)
     return
+  }
+
+  exportPgpKey(k: Kid): string | null {
+    const key = this.pgpKeys.get(k)
+    if (!key) {
+      return null
+    }
+    return key.exportKey()
   }
 
   async addKey(s: string): Promise<void> {
@@ -133,13 +173,16 @@ export class KeyRing {
   }
 
   async fetch(): Promise<void> {
+    const reporter = this.reporter.step(`fetch all public keys from ${chalk.bold('keybase')}`)
     const params = new URLSearchParams({uid: this.uid})
     const url = keybaseAPIServerURI + 'user/lookup.json?' + params.toString()
+    reporter.start(`contact ${chalk.grey(url)}`)
     const response = await axios.get(url)
     const keys = response.data.them.public_keys.all_bundles as string[]
     for (const raw of keys) {
       await this.addKey(raw)
     }
+    reporter.success(`got ${keys.length} keys`)
     return
   }
 }
@@ -250,5 +293,24 @@ export class KeyFamily {
     for (const key of revokes.kids || []) {
       this.revokeKey(key)
     }
+  }
+  summary(): string {
+    return [
+      `PUK generation: ${this.puk?.generation || 'n/a'}`,
+      `live devices: ${this.devices.size}`,
+      `live PGP keys: ${this.pgps.size}`,
+    ].join('; ')
+  }
+}
+
+export class UserKeys {
+  puk?: PerUserKey
+  devices: Device[]
+  pgpKeys: string[]
+
+  constructor(r: KeyRing, f: KeyFamily) {
+    this.puk = f.puk
+    this.devices = Array.from(f.devices.values())
+    this.pgpKeys = Array.from(f.pgps.keys()).map((kid: Kid) => r.exportPgpKey(kid))
   }
 }

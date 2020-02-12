@@ -3,11 +3,11 @@ import {Player} from './player'
 import {InteractiveReporter, NullReporter} from './reporter'
 import {Reporter} from './reporter'
 import fs from 'fs'
-import {UserSigChain, UserKeys} from './types'
-import {KeyRing} from './keys'
+import {UserSigChain} from './types'
+import {KeyRing, UserKeys} from './keys'
 
 const output = async (res: any, fileName: string): Promise<void> => {
-  if (!!fileName || process.stdout.isTTY) {
+  if (!fileName && process.stdout.isTTY) {
     return
   }
   const out = JSON.stringify(res)
@@ -57,15 +57,14 @@ export class Runner {
   }
 
   async runWithReporter(r: Reporter): Promise<UserSigChain | UserKeys> {
-    const treeWalker = new TreeWalker()
-    treeWalker.setReporter(r)
+    const treeWalker = new TreeWalker(r)
     const userSigChain = await treeWalker.walkUidOrUsername(this.username)
     if (this.opts.tree) {
       return userSigChain
     }
-    const keyring = new KeyRing(userSigChain.uid)
+    const keyring = new KeyRing(userSigChain.uid, r)
     await keyring.fetch()
-    const player = new Player()
+    const player = new Player(r)
     const userKeys = await player.play(userSigChain, keyring)
     return userKeys
   }

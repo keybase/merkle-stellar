@@ -1,6 +1,5 @@
 import {
   UserSigChain,
-  UserKeys,
   ChainLinkJSON,
   DeviceJSON,
   Kid,
@@ -13,10 +12,18 @@ import {
   PerUserKeyJSON,
   EncSigPair,
   perUserKeyFromJSON,
+  PgpUpdateJSON,
 } from './types'
-import {KeyRing as Keyring, KeyFamily, isNaClSigKey, isPgpKey} from './keys'
+import {KeyRing as Keyring, KeyFamily, isNaClSigKey, isPgpKey, UserKeys} from './keys'
 import {sha256} from './util'
 import kbpgp from 'kbpgp'
+import {Reporter, newReporter} from './reporter'
+import chalk from 'chalk'
+import {promisify} from 'util'
+
+function timeout(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 class ChainLink {
   json: ChainLinkJSON
@@ -35,6 +42,7 @@ class ChainLink {
   sibkey = (): SibkeyJSON | null => this.json.body.sibkey
   subkey = (): SubkeyJSON | null => this.json.body.subkey
   perUserKey = (): PerUserKeyJSON | null => this.json.body.per_user_key
+  pgpUpdate = (): PgpUpdateJSON | null => this.json.body.pgp_update
 
   sibkeyPayloadWithNulledReverseSig = (): string => {
     const rs = this.json.body.sibkey?.reverse_sig
@@ -90,6 +98,12 @@ const hardcodedResets: {[key: string]: number} = {
 const isEmpty = (c: Array<any>): boolean => !c || c.length == 0
 
 export class Player {
+  reporter: Reporter
+
+  constructor(r?: Reporter) {
+    this.reporter = newReporter(r)
+  }
+
   // When we're *in the middle of a subchain* (see the note below), there are
   // four ways we can tell that a link is the start of a new subchain:
   // 1) The link is seqno 1, the very first link the user ever makes.
@@ -247,6 +261,11 @@ export class Player {
   }
 
   async playPgpUpdate(link: BundleWrapper, keyring: Keyring, keyFamily: KeyFamily): Promise<void> {
+    const update = link.link.pgpUpdate()
+    if (!update) {
+      throw new Error('missing PGP update')
+    }
+    keyring.selectPgpKey(update.kid, update.full_hash)
     return
   }
 
@@ -283,6 +302,9 @@ export class Player {
       throw new Error('got an empty chain but we expected an eldest kid')
     }
 
+    const reporter = this.reporter.step(`play sigchain for ${chalk.italic(uid)}`)
+    reporter.start(`eldest key: ${expectedEldest}`)
+
     const keyFamily = await this.playEldestLink(uid, chain[0], keyring, expectedEldest)
 
     let i = 1
@@ -291,6 +313,7 @@ export class Player {
 
       const sigId = await this.verifyLink(link, keyring, keyFamily)
       const type = link.link.type()
+      reporter.update(`checked link ${link.link.seqno()}`)
       switch (type) {
         case 'sibkey':
           await this.playSibkey(link, sigId, keyring, keyFamily)
@@ -307,13 +330,15 @@ export class Player {
         case 'eldest':
           throw new Error(`unexpected eldest in middle of subchain ${i}`)
       }
+      await timeout(1)
       const revokes = link.link.revokes()
       keyFamily.revokeBatch(revokes)
       i++
     }
-    console.log(keyFamily)
 
-    return null
+    reporter.success(`got key family: ${chalk.bold(keyFamily.summary())}`)
+    const ret = new UserKeys(keyring, keyFamily)
+    return ret
   }
 
   checkSubchainAgainstResetChain(chain: UserSigChain, subchain: ChainLinkBundle[]): ChainLinkBundle[] {

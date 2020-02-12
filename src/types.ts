@@ -116,6 +116,11 @@ export type PerUserKeyJSON = {
   reverse_sig: string
 }
 
+export type PgpUpdateJSON = {
+  full_hash: Sha256Hash
+  kid: Kid
+}
+
 export type ChainLinkJSON = {
   body: {
     type: string
@@ -129,6 +134,7 @@ export type ChainLinkJSON = {
     version: number
     sibkey?: SibkeyJSON
     subkey?: SubkeyJSON
+    pgp_update?: PgpUpdateJSON
     per_user_key?: PerUserKeyJSON
   }
   ctime: number
@@ -204,11 +210,6 @@ export type Device = {
 
 export const deviceFromJSON = (d: DeviceJSON, sigKid: Kid): Device => {
   return {name: d.name, id: d.id, type: d.type, keys: {sig: sigKid} as EncSigPair} as Device
-}
-
-export type UserKeys = {
-  puk?: EncSigPair
-  devices: Device[]
 }
 
 export class ChainMaxes {
