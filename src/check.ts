@@ -14,7 +14,7 @@ const sha256 = (b: Buffer): Sha256Hash => {
   return createHash('sha256')
     .update(b)
     .digest('hex') as Sha256Hash
-}
+
 
 const sha512 = (b: Buffer): Sha512Hash => {
   return createHash('sha512')
