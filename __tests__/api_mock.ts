@@ -9,10 +9,10 @@ const apiMockDataFile = (url: string): string | null => {
     return './data/ledger.json'
   }
   const tab: {[key: string]: any} = {
-    'https://keybase.io/_/api/1.0/merkle/path.json?uid=dbb165b7879fe7b1174df73bed0b9500&start_hash256=2dd5285fe116e8cc3a70f026338b7373c486d1229d0f97d8b2027c70db4707ac':
+    'https://keybase.io/_/api/1.0/merkle/path.json?uid=dbb165b7879fe7b1174df73bed0b9500&start_hash256=178bcfd7696baea2cd26f5ddcfe8a466fcd7df2d1f8134ab4b55370ea5793414':
       './data/path_by_uid_max.json',
     'https://keybase.io/_/api/1.0/sig/get.json?uid=dbb165b7879fe7b1174df73bed0b9500': './data/sigs_for_max.json',
-    'https://keybase.io/_/api/1.0/merkle/path.json?username=max&start_hash256=2dd5285fe116e8cc3a70f026338b7373c486d1229d0f97d8b2027c70db4707ac':
+    'https://keybase.io/_/api/1.0/merkle/path.json?username=max&start_hash256=178bcfd7696baea2cd26f5ddcfe8a466fcd7df2d1f8134ab4b55370ea5793414':
       './data/path_by_username_max.json',
   }
   const ret = tab[url]
