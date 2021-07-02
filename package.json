@@ -55,7 +55,7 @@
     "kbpgp": "^2.1.9",
     "ora": "^4.0.3",
     "spinnies": "^0.5.1",
-    "stellar-sdk": "^3.3.0",
+    "stellar-sdk": "^8.2.3",
     "yargs": "^15.1.0"
   },
   "devDependencies": {
